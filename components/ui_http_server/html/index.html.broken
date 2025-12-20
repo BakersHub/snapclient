@@ -133,6 +133,61 @@
 	<div class="led-controller" id="ledController">
 		<h2>🎵 Sound-Reactive LEDs</h2>
 		
+		<h3 style="margin-top: 20px; color: #666;">💾 Persistent Configuration</h3>
+		<p style="font-size: 0.9rem; color: #888;">Changes below will be saved to flash and persist after restart</p>
+		
+		<div class="led-control-group">
+			<label for="cfgNumLeds">Number of LEDs:</label>
+			<input type="number" id="cfgNumLeds" min="1" max="1000" value="100">
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgGpioPin">GPIO Pin:</label>
+			<input type="number" id="cfgGpioPin" min="0" max="39" value="23">
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultBrightness">Default Brightness:</label>
+			<input type="range" id="cfgDefaultBrightness" min="0" max="255" value="128">
+			<span id="cfgBrightnessVal">128</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultEffect">Default Effect:</label>
+			<select id="cfgDefaultEffect">
+				<option value="0">Off</option>
+				<option value="1">VU Meter</option>
+				<option value="2">Spectrum Analyzer</option>
+				<option value="3">Pulse</option>
+				<option value="4">Wave</option>
+				<option value="5">Energy Bar</option>
+				<option value="6">Rainbow Pulse</option>
+				<option value="7">Beat Flash</option>
+				<option value="8">Bass Pulse</option>
+				<option value="9">Stereo VU</option>
+				<option value="10">Solid Color</option>
+			</select>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultSpeed">Default Speed:</label>
+			<input type="range" id="cfgDefaultSpeed" min="0" max="255" value="128">
+			<span id="cfgSpeedVal">128</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultSensitivity">Default Sensitivity:</label>
+			<input type="range" id="cfgDefaultSensitivity" min="0" max="255" value="150">
+			<span id="cfgSensitivityVal">150</span>
+		</div>
+		
+		<button onclick="saveLEDConfig()" style="margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
+			💾 Save Configuration & Restart
+		</button>
+		
+		<h3 style="margin-top: 30px; color: #666;">🎨 Live Controls</h3>
+		<p style="font-size: 0.9rem; color: #888;">Changes below take effect immediately (not saved)</p>
+		
 		<div class="led-control-group">
 			<label for="ledEffect">Effect:</label>
 			<select id="ledEffect" onchange="updateLED()">
@@ -211,6 +266,17 @@
 			document.getElementById('sensitivityValue').textContent = document.getElementById('ledSensitivity').value;
 		}
 		
+		function updateConfigDisplays() {
+			document.getElementById('cfgBrightnessVal').textContent = document.getElementById('cfgDefaultBrightness').value;
+			document.getElementById('cfgSpeedVal').textContent = document.getElementById('cfgDefaultSpeed').value;
+			document.getElementById('cfgSensitivityVal').textContent = document.getElementById('cfgDefaultSensitivity').value;
+		}
+		
+		// Update config value displays
+		document.getElementById('cfgDefaultBrightness').oninput = updateConfigDisplays;
+		document.getElementById('cfgDefaultSpeed').oninput = updateConfigDisplays;
+		document.getElementById('cfgDefaultSensitivity').oninput = updateConfigDisplays;
+		
 		function hexToRgb(hex) {
 			var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
 			return result ? {
@@ -244,15 +310,63 @@
 				body: params
 			})
 			.then(response => response.text())
+			.then(dasaveLEDConfig() {
+			var params = 'num_leds=' + document.getElementById('cfgNumLeds').value +
+						'&gpio_pin=' + document.getElementById('cfgGpioPin').value +
+						'&brightness=' + document.getElementById('cfgDefaultBrightness').value +
+						'&effect=' + document.getElementById('cfgDefaultEffect').value +
+						'&speed=' + document.getElementById('cfgDefaultSpeed').value +
+						'&sensitivity=' + document.getElementById('cfgDefaultSensitivity').value;
+			
+			document.getElementById('ledStatus').textContent = '💾 Saving configuration...';
+			document.getElementById('ledStatus').style.background = '#fff3cd';
+			document.getElementById('ledStatus').style.color = '#856404';
+			
+			fe// Load live controls
+					document.getElementById('ledEffect').value = data.effect;
+					document.getElementById('ledBrightness').value = data.brightness;
+					document.getElementById('ledSpeed').value = data.speed;
+					document.getElementById('ledSensitivity').value = data.sensitivity;
+					
+					// Load config values
+					document.getElementById('cfgNumLeds').value = data.num_leds;
+					document.getElementById('cfgGpioPin').value = 23; // Will come from backend later
+					document.getElementById('cfgDefaultBrightness').value = data.brightness;
+					document.getElementById('cfgDefaultEffect').value = data.effect;
+					document.getElementById('cfgDefaultSpeed').value = data.speed;
+					document.getElementById('cfgDefaultSensitivity').value = data.sensitivity
+				body: params
+			})
+			.tupdateConfigDisplays();
+					hen(response => response.text())
 			.then(data => {
 				document.getElementById('ledStatus').textContent = '✓ ' + data;
-				setTimeout(() => { document.getElementById('ledStatus').textContent = 'Ready'; }, 2000);
+				document.getElementById('ledStatus').style.background = '#d4edda';
+				document.getElementById('ledStatus').style.color = '#155724';
 			})
 			.catch(error => {
 				document.getElementById('ledStatus').textContent = '✗ Error: ' + error;
 				document.getElementById('ledStatus').style.background = '#ffebee';
 				document.getElementById('ledStatus').style.color = '#c62828';
 			});
+		}
+		
+		function updateLEDConfig() {
+			// Deprecated - keeping for compatibility
+			document.getElementById('ledStatus').textContent = 'Use "Save Configuration & Restart" button above
+			.catch(error => {
+				document.getElementById('ledStatus').textContent = '✗ Error: ' + error;
+				document.getElementById('ledStatus').style.background = '#ffebee';
+				document.getElementById('ledStatus').style.color = '#c62828';
+			});
+		}
+		
+		function updateLEDConfig() {
+			var numLeds = document.getElementById('ledNumLeds').value;
+			
+			document.getElementById('ledStatus').textContent = 'Note: LED count is set in Kconfig (currently ' + numLeds + ')';
+			document.getElementById('ledStatus').style.background = '#fff3cd';
+			document.getElementById('ledStatus').style.color = '#856404';
 		}
 		
 		function loadLEDConfig() {
@@ -263,6 +377,7 @@
 					document.getElementById('ledBrightness').value = data.brightness;
 					document.getElementById('ledSpeed').value = data.speed;
 					document.getElementById('ledSensitivity').value = data.sensitivity;
+					document.getElementById('ledNumLeds').value = data.num_leds;
 					
 					var hex = '#' + 
 							('0' + data.color.r.toString(16)).slice(-2) +

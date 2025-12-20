@@ -44,4 +44,87 @@ menu "Snapclient Configuration"
 
             Both approaches have similar performance keeping clients in sync <= 500µs
 
+	menu "Volume Control"
+		config ENABLE_VOLUME_BUTTONS
+			bool "Enable Volume Control Buttons"
+			default y
+			help
+				Enable GPIO-based volume up/down buttons.
+
+		config VOLUME_UP_PIN
+			int "Volume UP button GPIO"
+			default 27
+			depends on ENABLE_VOLUME_BUTTONS
+			help
+				GPIO pin for volume UP button (active HIGH with pull-down).
+
+		config VOLUME_DOWN_PIN
+			int "Volume DOWN button GPIO"
+			default 14
+			depends on ENABLE_VOLUME_BUTTONS
+			help
+				GPIO pin for volume DOWN button (active HIGH with pull-down).
+
+		config SNAPCAST_GAIN_BOOST
+			string "Volume Gain Boost Multiplier"
+			default "0.1"
+			help
+				Gain boost multiplier applied to volume to match A2DP loudness levels.
+				Default is 1.0 (0% boost). Use values like 0.5, 1.0, 1.5, etc.
+				Higher values increase overall volume, lower values decrease it.
+	endmenu
+
+	menu "SH1106 Display Configuration"
+		config ENABLE_SH1106_DISPLAY
+			bool "Enable SH1106 OLED Display"
+			default y
+			help
+				Enable SH1106 128x64 OLED display support for showing device name, WiFi signal, and audio visualization.
+
+		config SH1106_I2C_SDA_GPIO
+			int "I2C SDA GPIO"
+			default 21
+			depends on ENABLE_SH1106_DISPLAY
+			help
+				GPIO pin for I2C SDA (data line).
+
+		config SH1106_I2C_SCL_GPIO
+			int "I2C SCL GPIO"
+			default 22
+			depends on ENABLE_SH1106_DISPLAY
+			help
+				GPIO pin for I2C SCL (clock line).
+
+		config SH1106_I2C_FREQ_HZ
+			int "I2C Frequency (Hz)"
+			default 400000
+			depends on ENABLE_SH1106_DISPLAY
+			help
+				I2C bus frequency in Hz.
+
+		config SH1106_I2C_ADDRESS
+			hex "I2C Address"
+			default 0x3C
+			depends on ENABLE_SH1106_DISPLAY
+			help
+				I2C address of the SH1106 display (usually 0x3C or 0x3D).
+
+		config SH1106_DISPLAY_OFFSET
+			int "Vertical display offset (rows)"
+			default 0
+			depends on ENABLE_SH1106_DISPLAY
+			help
+				Vertical offset applied via the SH1106/SSD1306 SETDISPLAYOFFSET command.
+				Use 0 for most 0.96" 128x64 modules; some 1.28" SH1106 panels
+				may need a small non-zero offset so the content is vertically centered.
+
+		config SH1106_COLUMN_OFFSET
+			int "Horizontal column offset (pixels)"
+			default 2
+			depends on ENABLE_SH1106_DISPLAY
+			help
+				Horizontal column offset for the panel. Classic SH1106 1.28" modules
+				typically use 2, while many 0.96" SSD1306 128x64 modules use 0.
+	endmenu
+
 endmenu

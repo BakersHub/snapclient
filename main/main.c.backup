@@ -31,7 +31,6 @@
 
 #if CONFIG_BT_ENABLED
 #include "bt_audio_main.h"
-#include "bt_audio_sink.h"
 #endif
 
 #include "board.h"
@@ -53,16 +52,8 @@
 #include <sys/time.h>
 
 #include "driver/i2s_std.h"
-#include "driver/gpio.h"
-#include "esp_http_client.h"
-#include "cJSON.h"
 #if CONFIG_USE_DSP_PROCESSOR
 #include "dsp_processor.h"
-#endif
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-#include "led_controller.h"
-#include "led_config_nvs.h"
 #endif
 
 // Opus decoder is implemented as a subcomponet from master git repo
@@ -78,25 +69,6 @@
 #if CONFIG_ENABLE_SH1106_DISPLAY
 #include "display_sh1106.h"
 #endif
-
-#include "system_config.h"
-
-static system_config_t g_system_config;
-
-// Volume control GPIO definitions are taken from system configuration
-#define VOLUME_UP_GPIO   (g_system_config.volume_up_pin)
-#define VOLUME_DOWN_GPIO (g_system_config.volume_down_pin)
-
-// LED effect toggle button GPIO from system configuration
-#define LED_EFFECT_BUTTON_GPIO (g_system_config.effect_button_pin)
-
-#define VOLUME_BUTTON_DEBOUNCE_MS 100  // Volume button debounce - reduced for instant feel
-#define VOLUME_REPEAT_RATE_MS 500      // Repeat rate when holding button
-
-// Recovery AP trigger button (GPIO19, active-high)
-// Wire a momentary button so that pressing it drives GPIO19 HIGH.
-#define AP_MODE_BUTTON_GPIO GPIO_NUM_19
-#define AP_MODE_HOLD_MS     3000
 
 static bool isCachedChunk = false;
 static uint32_t cachedBlocks = 0;
@@ -114,26 +86,6 @@ static void error_callback(const FLAC__StreamDecoder *decoder,
                            FLAC__StreamDecoderErrorStatus status,
                            void *client_data);
 
-/* Volume control function declarations */
-static void init_volume_buttons(void);
-static void volume_button_task(void *pvParameters);
-static void send_volume_update_to_server(int volume_percent);
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-/* LED effect toggle button declarations */
-static void init_effect_button(void);
-static void effect_button_task(void *pvParameters);
-#endif
-
-/* AP mode trigger from GPIO0 */
-static void ap_mode_button_task(void *pvParameters);
-
-#if CONFIG_ENABLE_SH1106_DISPLAY
-/* WiFi signal monitoring function declarations */
-static void update_wifi_signal_display(void);
-static void wifi_signal_monitor_task(void *pvParameters);
-#endif
-
 static FLAC__StreamDecoder *flacDecoder = NULL;
 
 const char *VERSION_STRING = "0.0.3";
@@ -148,25 +100,8 @@ const char *VERSION_STRING = "0.0.3";
 TaskHandle_t t_ota_task = NULL;
 TaskHandle_t t_http_get_task = NULL;
 
-#if CONFIG_ENABLE_SH1106_DISPLAY
-/* WiFi signal monitoring */
-static TaskHandle_t wifi_monitor_task_handle = NULL;
-static int32_t current_rssi = -100;
-#endif
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-static bool led_initialized = false;
-#endif
-
-/* Global snapcast settings for server synchronization */
-snapcastSetting_t scSet;
-
-/* Global network connection variables for volume control */
-struct netconn *lwipNetconn;
-ip_addr_t remote_ip;  // Global snapcast server IP for volume control
-
-#define FAST_SYNC_LATENCY_BUF 20000      // in µs - Less aggressive sync for server buffer compatibility
-#define NORMAL_SYNC_LATENCY_BUF 2000000  // in µs - Allow more tolerance for 950ms server buffer
+#define FAST_SYNC_LATENCY_BUF 10000      // in µs
+#define NORMAL_SYNC_LATENCY_BUF 1000000  // in µs
 
 struct timeval tdif, tavg;
 
@@ -176,6 +111,7 @@ struct timeval tdif, tavg;
 #define SNAPCAST_SERVER_HOST CONFIG_SNAPSERVER_HOST
 #define SNAPCAST_SERVER_PORT CONFIG_SNAPSERVER_PORT
 #endif
+#define SNAPCAST_CLIENT_NAME CONFIG_SNAPCLIENT_NAME
 #define SNAPCAST_USE_SOFT_VOL CONFIG_SNAPCLIENT_USE_SOFT_VOL
 
 /* Logging tag */
@@ -531,60 +467,6 @@ void audio_set_volume(int volume) {
     xQueueOverwrite(audioDACQHdl, &audioDAC_data);
   }
   xSemaphoreGive(audioDACSemaphore);
-  
-#if CONFIG_ENABLE_SH1106_DISPLAY
-  // Update display with new snapcast volume
-  display_set_snapcast_volume((uint8_t)volume);
-#endif
-}
-
-// Static variable to store volume before Bluetooth mute
-static int pre_bluetooth_volume = -1;
-
-/**
- * Mute Snapcast when Bluetooth audio starts playing
- */
-void snapcast_mute_for_bluetooth(void) {
-    // Store current volume if not already muted
-    if (pre_bluetooth_volume == -1 && scSet.volume > 0) {
-        pre_bluetooth_volume = scSet.volume;
-        ESP_LOGI("SC", "Storing Snapcast volume (%d%%) and muting for Bluetooth", pre_bluetooth_volume);
-    }
-    
-    // Set volume to 0 to mute Snapcast
-    if (scSet.volume > 0) {
-        scSet.volume = 0;
-        scSet.muted = true;
-        audio_set_volume(0);
-      // Inform Snapserver so it stops sending audio and frees WiFi
-      send_volume_update_to_server(0);
-#if CONFIG_ENABLE_SH1106_DISPLAY
-        display_set_snapcast_mute(true);
-#endif
-        ESP_LOGI("SC", "Snapcast muted for Bluetooth audio");
-    }
-}
-
-/**
- * Unmute Snapcast when Bluetooth audio stops
- */
-void snapcast_unmute_after_bluetooth(void) {
-    // Restore previous volume if we have one stored
-    if (pre_bluetooth_volume > 0) {
-        ESP_LOGI("SC", "Restoring Snapcast volume to %d%% after Bluetooth", pre_bluetooth_volume);
-        scSet.volume = pre_bluetooth_volume;
-        scSet.muted = false;
-        audio_set_volume(pre_bluetooth_volume);
-        // Restore volume on Snapserver so stream resumes at the same level
-        send_volume_update_to_server(pre_bluetooth_volume);
-#if CONFIG_ENABLE_SH1106_DISPLAY
-        display_set_snapcast_mute(false);
-#endif
-        pre_bluetooth_volume = -1; // Reset stored volume
-        ESP_LOGI("SC", "Snapcast unmuted and restored to %"PRIu32"%%", scSet.volume);
-    } else {
-        ESP_LOGW("SC", "No previous Snapcast volume to restore");
-    }
 }
 
 /**
@@ -602,11 +484,14 @@ static void http_get_task(void *pvParameters) {
   int64_t tmpDiffToServer;
   int64_t lastTimeSync = 0;
   esp_timer_handle_t timeSyncMessageTimer = NULL;
+  esp_err_t err = 0;
   server_settings_message_t server_settings_message;
   bool received_header = false;
+  mdns_result_t *r;
   codec_type_t codec = NONE;
-  extern snapcastSetting_t scSet;  // Use global scSet instead of local shadow
+  snapcastSetting_t scSet;
   pcm_chunk_message_t *pcmData = NULL;
+  ip_addr_t remote_ip;
   uint16_t remotePort = 0;
   int rc1 = ERR_OK, rc2 = ERR_OK;
   struct netbuf *firstNetBuf = NULL;
@@ -673,11 +558,11 @@ static void http_get_task(void *pvParameters) {
 #if SNAPCAST_SERVER_USE_MDNS
     // Find snapcast server
     // Connect to first snapcast server found
-    mdns_result_t *r = NULL;
-    esp_err_t err = ESP_OK;
-    while (!r || err != ESP_OK) {
+    r = NULL;
+    err = 0;
+    while (!r || err) {
       ESP_LOGI(TAG, "Lookup snapcast service on network");
-      err = mdns_query_ptr("_snapcast", "_tcp", 3000, 20, &r);
+      esp_err_t err = mdns_query_ptr("_snapcast", "_tcp", 3000, 20, &r);
       if (err) {
         ESP_LOGE(TAG, "Query Failed");
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -708,23 +593,13 @@ static void http_get_task(void *pvParameters) {
     // configure a failsafe snapserver according to CONFIG values
     struct sockaddr_in servaddr;
 
-    const char *snap_host = SNAPCAST_SERVER_HOST;
-    int snap_port = SNAPCAST_SERVER_PORT;
-
-    if (g_system_config.snapserver_host[0] != '\0') {
-      snap_host = g_system_config.snapserver_host;
-    }
-    if (g_system_config.snapserver_port > 0 && g_system_config.snapserver_port <= 65535) {
-      snap_port = g_system_config.snapserver_port;
-    }
-
     servaddr.sin_family = AF_INET;
-    inet_pton(AF_INET, snap_host, &(servaddr.sin_addr.s_addr));
-    servaddr.sin_port = htons(snap_port);
+    inet_pton(AF_INET, SNAPCAST_SERVER_HOST, &(servaddr.sin_addr.s_addr));
+    servaddr.sin_port = htons(SNAPCAST_SERVER_PORT);
 
-    inet_pton(AF_INET, snap_host, &(remote_ip.u_addr.ip4.addr));
+    inet_pton(AF_INET, SNAPCAST_SERVER_HOST, &(remote_ip.u_addr.ip4.addr));
     remote_ip.type = IPADDR_TYPE_V4;
-    remotePort = snap_port;
+    remotePort = SNAPCAST_SERVER_PORT;
 
     ESP_LOGI(TAG, "try connecting to static configuration %s:%d",
              ipaddr_ntoa(&remote_ip), remotePort);
@@ -795,8 +670,7 @@ static void http_get_task(void *pvParameters) {
 
     // init hello message
     hello_message.mac = mac_address;
-    // Use runtime-configured snapclient name for Snapcast hello
-    hello_message.hostname = g_system_config.snapclient_name;
+    hello_message.hostname = SNAPCAST_CLIENT_NAME;
     hello_message.version = (char *)VERSION_STRING;
     hello_message.client_name = "libsnapcast";
     hello_message.os = "esp32";
@@ -851,6 +725,7 @@ static void http_get_task(void *pvParameters) {
     scSet.volume = 0;
     scSet.muted = true;
 
+    uint64_t startTime, endTime;
     //    size_t currentPos = 0;
     size_t typedMsgCurrentPos = 0;
     uint32_t typedMsgLen = 0;
@@ -1469,48 +1344,11 @@ static void http_get_task(void *pvParameters) {
                                 free(audio);
                                 audio = NULL;
 
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                bool ignore_volume_for_led = false;
-                                if (led_initialized && new_pcmChunk && new_pcmChunk->fragment->payload) {
-                                  led_config_t led_cfg;
-                                  if (led_controller_get_config(&led_cfg) == ESP_OK) {
-                                    ignore_volume_for_led = (led_cfg.ignore_volume != 0);
-                                  }
-                                }
-#endif
-
 #if CONFIG_USE_DSP_PROCESSOR
                                 if (new_pcmChunk->fragment->payload) {
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                  if (ignore_volume_for_led) {
-                                    // Feed LEDs with pre-volume PCM when ignoring playback volume
-                                    led_controller_feed_audio(
-                                        (const int16_t *)new_pcmChunk->fragment->payload,
-                                        new_pcmChunk->fragment->size / 4);
-                                  }
-#endif
-
                                   dsp_processor_worker(
                                       new_pcmChunk->fragment->payload,
                                       new_pcmChunk->fragment->size, scSet.sr);
-                                }
-#endif
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                if (led_initialized && new_pcmChunk && new_pcmChunk->fragment->payload) {
-#if CONFIG_USE_DSP_PROCESSOR
-                                  if (!ignore_volume_for_led) {
-                                    // Normal path: LEDs follow post-volume audio
-                                    led_controller_feed_audio(
-                                        (const int16_t *)new_pcmChunk->fragment->payload,
-                                        new_pcmChunk->fragment->size / 4);
-                                  }
-#else
-                                  // No DSP/soft volume: always feed as-is
-                                  led_controller_feed_audio(
-                                      (const int16_t *)new_pcmChunk->fragment->payload,
-                                      new_pcmChunk->fragment->size / 4);
-#endif
                                 }
 #endif
 
@@ -1617,50 +1455,13 @@ static void http_get_task(void *pvParameters) {
 
                                 new_pcmChunk->timestamp = wire_chnk.timestamp;
 
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                bool ignore_volume_for_led = false;
-                                if (led_initialized && new_pcmChunk && new_pcmChunk->fragment->payload) {
-                                  led_config_t led_cfg;
-                                  if (led_controller_get_config(&led_cfg) == ESP_OK) {
-                                    ignore_volume_for_led = (led_cfg.ignore_volume != 0);
-                                  }
-                                }
-#endif
-
 #if CONFIG_USE_DSP_PROCESSOR
                                 if (new_pcmChunk->fragment->payload) {
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                  if (ignore_volume_for_led) {
-                                    // Feed LEDs with pre-volume PCM when ignoring playback volume
-                                    led_controller_feed_audio(
-                                        (const int16_t *)new_pcmChunk->fragment->payload,
-                                        new_pcmChunk->fragment->size / 4);
-                                  }
-#endif
-
                                   dsp_processor_worker(
                                       new_pcmChunk->fragment->payload,
                                       new_pcmChunk->fragment->size, scSet.sr);
                                 }
 
-#endif
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                if (led_initialized && new_pcmChunk && new_pcmChunk->fragment->payload) {
-#if CONFIG_USE_DSP_PROCESSOR
-                                  if (!ignore_volume_for_led) {
-                                    // Normal path: LEDs follow post-volume audio
-                                    led_controller_feed_audio(
-                                        (const int16_t *)new_pcmChunk->fragment->payload,
-                                        new_pcmChunk->fragment->size / 4);
-                                  }
-#else
-                                  // No DSP/soft volume: always feed as-is
-                                  led_controller_feed_audio(
-                                      (const int16_t *)new_pcmChunk->fragment->payload,
-                                      new_pcmChunk->fragment->size / 4);
-#endif
-                                }
 #endif
 
                                 insert_pcm_chunk(new_pcmChunk);
@@ -1716,48 +1517,11 @@ static void http_get_task(void *pvParameters) {
                                 return;
                               }
 
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                              bool ignore_volume_for_led = false;
-                              if (led_initialized && pcmData && pcmData->fragment->payload) {
-                                led_config_t led_cfg;
-                                if (led_controller_get_config(&led_cfg) == ESP_OK) {
-                                  ignore_volume_for_led = (led_cfg.ignore_volume != 0);
-                                }
-                              }
-#endif
-
 #if CONFIG_USE_DSP_PROCESSOR
                               if ((pcmData) && (pcmData->fragment->payload)) {
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                                if (ignore_volume_for_led) {
-                                  // Feed LEDs with pre-volume PCM when ignoring playback volume
-                                  led_controller_feed_audio(
-                                      (const int16_t *)pcmData->fragment->payload,
-                                      pcmData->fragment->size / 4);
-                                }
-#endif
-
                                 dsp_processor_worker(pcmData->fragment->payload,
                                                      pcmData->fragment->size,
                                                      scSet.sr);
-                              }
-#endif
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-                              if (led_initialized && pcmData && pcmData->fragment->payload) {
-#if CONFIG_USE_DSP_PROCESSOR
-                                if (!ignore_volume_for_led) {
-                                  // Normal path: LEDs follow post-volume audio
-                                  led_controller_feed_audio(
-                                      (const int16_t *)pcmData->fragment->payload,
-                                      pcmData->fragment->size / 4);
-                                }
-#else
-                                // No DSP/soft volume: always feed as-is
-                                led_controller_feed_audio(
-                                    (const int16_t *)pcmData->fragment->payload,
-                                    pcmData->fragment->size / 4);
-#endif
                               }
 #endif
 
@@ -2348,12 +2112,6 @@ static void http_get_task(void *pvParameters) {
                           scSet.muted = server_settings_message.muted;
                           scSet.volume = server_settings_message.volume;
 
-#if CONFIG_ENABLE_SH1106_DISPLAY
-                          // Update display with server volume and mute state
-                          display_set_snapcast_volume((uint8_t)scSet.volume);
-                          display_set_snapcast_mute(scSet.muted);
-#endif
-
                           if (player_send_snapcast_setting(&scSet) != pdPASS) {
                             ESP_LOGE(TAG,
                                      "Failed to notify sync task. "
@@ -2694,441 +2452,6 @@ static void http_get_task(void *pvParameters) {
 }
 
 /**
- * Initialize volume control buttons (GPIO 27 & 14) with pull-down configuration
- * Buttons connect to 3.3V for active HIGH logic
- * Supports both Snapcast and Bluetooth A2DP volume control
- */
-static void init_volume_buttons(void) {
-    gpio_config_t vol_gpio_config = {
-        .pin_bit_mask = (1ULL << VOLUME_UP_GPIO) | (1ULL << VOLUME_DOWN_GPIO),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,    // DISABLE pull-ups
-        .pull_down_en = GPIO_PULLDOWN_ENABLE, // ENABLE pull-downs (buttons to 3.3V)
-        .intr_type = GPIO_INTR_DISABLE        // Polling mode for volume buttons
-    };
-    
-    esp_err_t ret = gpio_config(&vol_gpio_config);
-    if (ret != ESP_OK) {
-        ESP_LOGE("VOLUME", "Failed to configure volume GPIO pins: %s", esp_err_to_name(ret));
-        return;
-    }
-    
-    ESP_LOGI("VOLUME", "Volume buttons initialized: UP=GPIO%d, DOWN=GPIO%d", VOLUME_UP_GPIO, VOLUME_DOWN_GPIO);
-}
-
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-/**
- * Initialize LED effect toggle button GPIO with pull-down configuration
- * Button connects to 3.3V for active HIGH logic
- */
-static void init_effect_button(void) {
-  gpio_config_t eff_gpio_config = {
-    .pin_bit_mask = (1ULL << LED_EFFECT_BUTTON_GPIO),
-    .mode = GPIO_MODE_INPUT,
-    .pull_up_en = GPIO_PULLUP_DISABLE,
-    .pull_down_en = GPIO_PULLDOWN_ENABLE,
-    .intr_type = GPIO_INTR_DISABLE
-  };
-
-  esp_err_t ret = gpio_config(&eff_gpio_config);
-  if (ret != ESP_OK) {
-    ESP_LOGE("VOLUME", "Failed to configure LED effect button GPIO %d: %s", LED_EFFECT_BUTTON_GPIO, esp_err_to_name(ret));
-    return;
-  }
-
-  ESP_LOGI("VOLUME", "LED effect button initialized on GPIO%d", LED_EFFECT_BUTTON_GPIO);
-}
-
-/**
- * Initialize LED controller for sound-reactive effects
- */
-static void init_led_controller(void)
-{
-    // Try to load config from NVS first
-    led_config_nvs_t nvs_config;
-    esp_err_t ret = led_config_load_from_nvs(&nvs_config);
-    
-    led_config_t led_config;
-    
-    if (ret == ESP_OK) {
-        // Use NVS configuration
-        ESP_LOGI("LED", "Loading LED config from NVS: %d LEDs on GPIO %d", 
-                 nvs_config.num_leds, nvs_config.gpio_pin);
-      if (!nvs_config.enabled || nvs_config.num_leds == 0) {
-        ESP_LOGW("LED", "LED controller disabled by config (enabled=%d, num_leds=%d)",
-             nvs_config.enabled, nvs_config.num_leds);
-        return;
-      }
-        led_config.gpio_pin = nvs_config.gpio_pin;
-        led_config.num_leds = nvs_config.num_leds;
-        led_config.brightness = nvs_config.brightness;
-        led_config.effect = nvs_config.effect;
-        led_config.speed = nvs_config.speed;
-        led_config.sensitivity = nvs_config.sensitivity;
-        led_config.color_order = nvs_config.color_order;
-        led_config.ignore_volume = nvs_config.ignore_volume;
-        led_config.bass_focus = nvs_config.bass_focus;
-        led_config.auto_rainbow = nvs_config.auto_rainbow;
-        led_config.rainbow_speed = nvs_config.rainbow_speed;
-        led_config.auto_rainbow2 = nvs_config.auto_rainbow2;
-        led_config.rainbow_speed2 = nvs_config.rainbow_speed2;
-        led_config.color1.r = nvs_config.color_r;
-        led_config.color1.g = nvs_config.color_g;
-        led_config.color1.b = nvs_config.color_b;
-        // Load secondary color (falls back to defaults if not present)
-        led_config.color2.r = nvs_config.color2_r;
-        led_config.color2.g = nvs_config.color2_g;
-        led_config.color2.b = nvs_config.color2_b;
-    } else {
-        // Fall back to Kconfig defaults
-        ESP_LOGI("LED", "No NVS config found, using Kconfig defaults");
-        led_config.gpio_pin = CONFIG_LED_GPIO_PIN;
-        led_config.num_leds = CONFIG_LED_NUM_LEDS;
-        led_config.brightness = CONFIG_LED_DEFAULT_BRIGHTNESS;
-        led_config.effect = CONFIG_LED_DEFAULT_EFFECT;
-        led_config.speed = CONFIG_LED_DEFAULT_SPEED;
-        led_config.sensitivity = CONFIG_LED_DEFAULT_SENSITIVITY;
-        led_config.color_order = 0;
-        led_config.ignore_volume = 0;
-        led_config.bass_focus = 128;
-        led_config.auto_rainbow = 0;
-        led_config.rainbow_speed = 128;
-        led_config.auto_rainbow2 = 0;
-        led_config.rainbow_speed2 = 128;
-        led_config.color1.r = 255;
-        led_config.color1.g = 0;
-        led_config.color1.b = 0;
-        // Kconfig defaults: primary red, secondary blue
-        led_config.color2 = (led_color_t){.r = 0, .g = 0, .b = 255};
-    }
-    
-    ret = led_controller_init(&led_config);
-    if (ret == ESP_OK) {
-        ESP_LOGI("LED", "LED controller initialized: %d LEDs on GPIO %d", 
-                 led_config.num_leds, led_config.gpio_pin);
-        led_initialized = true;
-    } else {
-        ESP_LOGE("LED", "Failed to initialize LED controller: %s", 
-                 esp_err_to_name(ret));
-    }
-}
-#endif
-
-/**
- * Send JSON-RPC Client.SetVolume request to snapcast server
- * Updates the server with the current volume level for proper synchronization
- */
-static void send_volume_update_to_server(int volume_percent) {
-    // Get external references
-    extern struct netconn *lwipNetconn;
-    extern ip_addr_t remote_ip;
-
-    // If we don't have a valid Snapserver connection yet, skip update
-    if (lwipNetconn == NULL || remote_ip.u_addr.ip4.addr == 0) {
-      ESP_LOGW("SC", "Skipping volume update, no Snapserver connection");
-      return;
-    }
-
-    ESP_LOGI("SC", "Attempting volume update to server: %d%%", volume_percent);
-    
-    // Get client MAC address for the client ID
-    uint8_t base_mac[6];
-#if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET || CONFIG_SNAPCLIENT_USE_SPI_ETHERNET
-    esp_read_mac(base_mac, ESP_MAC_ETH);
-#else
-    esp_read_mac(base_mac, ESP_MAC_WIFI_STA);
-#endif
-    
-    char mac_address[18];
-    sprintf(mac_address, "%02X:%02X:%02X:%02X:%02X:%02X", 
-            base_mac[0], base_mac[1], base_mac[2], base_mac[3], base_mac[4], base_mac[5]);
-    
-    // Create JSON-RPC Client.SetVolume request
-    cJSON *json_request = cJSON_CreateObject();
-    cJSON *params = cJSON_CreateObject();
-    cJSON *volume = cJSON_CreateObject();
-    
-    cJSON_AddStringToObject(json_request, "id", "8");
-    cJSON_AddStringToObject(json_request, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(json_request, "method", "Client.SetVolume");
-    
-    cJSON_AddStringToObject(params, "id", mac_address);
-    cJSON_AddBoolToObject(volume, "muted", (volume_percent == 0));
-    cJSON_AddNumberToObject(volume, "percent", volume_percent);
-    cJSON_AddItemToObject(params, "volume", volume);
-    cJSON_AddItemToObject(json_request, "params", params);
-    
-    char *json_string = cJSON_Print(json_request);
-    if (json_string != NULL) {
-      char server_url[64];
-      snprintf(server_url, sizeof(server_url), "http://" IPSTR ":1780/jsonrpc",
-           IP2STR(&remote_ip.u_addr.ip4));
-
-      // Try a few short, synchronous attempts to increase reliability
-      // without blocking too long on any single failure.
-      const int max_attempts = 3;
-      for (int attempt = 1; attempt <= max_attempts; ++attempt) {
-        esp_http_client_config_t config = {
-          .url = server_url,
-          .method = HTTP_METHOD_POST,
-          .timeout_ms = 1000,  // LAN should respond fast; keep it short
-        };
-
-        esp_http_client_handle_t client = esp_http_client_init(&config);
-        if (client == NULL) {
-          ESP_LOGW("SC", "Failed to init HTTP client for volume update (attempt %d)", attempt);
-          continue;
-        }
-
-        esp_http_client_set_header(client, "Content-Type", "application/json");
-        esp_http_client_set_post_field(client, json_string, strlen(json_string));
-
-        esp_err_t err = esp_http_client_perform(client);
-        if (err == ESP_OK) {
-          ESP_LOGI("SC", "Volume update sent successfully on attempt %d", attempt);
-          esp_http_client_cleanup(client);
-          break;
-        } else {
-          ESP_LOGW("SC", "HTTP volume update failed (attempt %d/%d): %s",
-               attempt, max_attempts, esp_err_to_name(err));
-          esp_http_client_cleanup(client);
-          if (attempt < max_attempts) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-          }
-        }
-      }
-
-      free(json_string);
-    }
-    cJSON_Delete(json_request);
-}
-
-  #ifdef CONFIG_ENABLE_LED_CONTROLLER
-  /**
-   * LED effect toggle button task
-   * Each press toggles between the current effect and OFF
-   */
-  static void effect_button_task(void *pvParameters) {
-    ESP_LOGI("VOLUME", "LED effect button task started");
-
-    // Small delay to ensure LED controller is initialized
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    int last_state = 0;
-    uint32_t last_toggle_time = 0;
-
-    led_effect_t last_non_off_effect = LED_EFFECT_VU_METER;
-    bool last_effect_valid = false;
-
-    while (1) {
-      uint32_t current_time = esp_timer_get_time() / 1000; // ms
-
-      int state = gpio_get_level(LED_EFFECT_BUTTON_GPIO);
-
-      // Rising edge detection with debounce
-      if (state == 1 && last_state == 0 && (current_time - last_toggle_time) > VOLUME_BUTTON_DEBOUNCE_MS) {
-        last_toggle_time = current_time;
-
-        led_config_t led_cfg;
-        if (led_controller_get_config(&led_cfg) == ESP_OK) {
-          if (led_cfg.effect == LED_EFFECT_OFF) {
-            // Restore last non-off effect if we have one, otherwise use VU Meter
-            led_effect_t target = last_effect_valid ? last_non_off_effect : LED_EFFECT_VU_METER;
-            ESP_LOGI("VOLUME", "Effect button: restoring effect %d", target);
-            led_controller_set_effect(target);
-          } else {
-            // Remember current effect and turn LEDs off
-            last_non_off_effect = led_cfg.effect;
-            last_effect_valid = true;
-            ESP_LOGI("VOLUME", "Effect button: turning LEDs OFF (was %d)", led_cfg.effect);
-            led_controller_set_effect(LED_EFFECT_OFF);
-          }
-        }
-      }
-
-      last_state = state;
-
-      vTaskDelay(pdMS_TO_TICKS(50));
-    }
-  }
-  #endif
-
-/**
- * Volume control task - polls GPIO 27 (up) and GPIO 14 (down) buttons
- * Uses pull-down logic: button press connects GPIO HIGH (to 3.3V)
- * Integrates with both Snapcast and Bluetooth audio systems
- * Automatically detects mode and uses appropriate volume control
- */
-static void volume_button_task(void *pvParameters) {
-    ESP_LOGI("VOLUME", "Volume button task started");
-    
-    // Audio system already initialized - minimal delay
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
-    uint32_t last_vol_up_time = 0;
-    uint32_t last_vol_down_time = 0;
-    
-    while (1) {
-        uint32_t current_time = esp_timer_get_time() / 1000;  // Convert to milliseconds
-        
-        // Read volume button states (pull-down: HIGH when pressed)
-        int vol_up_state = gpio_get_level(VOLUME_UP_GPIO);    
-        int vol_down_state = gpio_get_level(VOLUME_DOWN_GPIO); 
-        
-#if CONFIG_BT_ENABLED
-        bool bt_connected = bt_audio_sink_is_connected();
-        
-        // Only log on Bluetooth connection state changes
-        static bool last_bt_state = false;
-        static int last_bt_volume = -1;
-        if (bt_connected != last_bt_state) {
-            ESP_LOGI("VOLUME", "Bluetooth connection: %s", bt_connected ? "CONNECTED" : "DISCONNECTED");
-            last_bt_state = bt_connected;
-            last_bt_volume = -1; // Reset volume tracking on connection change
-        }
-        
-        // Only log volume changes when connected
-        if (bt_connected) {
-            int current_bt_volume = bt_audio_get_volume_percent();
-            if (current_bt_volume != last_bt_volume) {
-                ESP_LOGI("VOLUME", "BT volume: %d%%", current_bt_volume);
-                last_bt_volume = current_bt_volume;
-            }
-        }
-#else
-        bool bt_connected = false;
-#endif
-        
-        // Volume UP (GPIO 27) - Active HIGH (button connects to 3.3V)
-        if (vol_up_state == 1) {
-            if (current_time - last_vol_up_time > VOLUME_BUTTON_DEBOUNCE_MS) {
-                ESP_LOGI("VOLUME", "Volume UP pressed");
-                
-                if (bt_connected) {
-                    // Bluetooth mode - use A2DP volume control
-                    int current_bt_volume = bt_audio_get_volume_percent();
-                    int new_volume = current_bt_volume + 10;
-                    if (new_volume > 100) new_volume = 100;
-                    
-#if CONFIG_BT_ENABLED
-                    bt_audio_volume_up();
-#endif
-                } else {
-                    // Snapcast mode - use existing snapcast volume control
-                    int current_volume = scSet.volume;  // Use server's current volume
-                    int new_volume = current_volume + 6;
-                    if (new_volume > 100) new_volume = 100;
-                    
-                    ESP_LOGI("SC", "Snapcast Volume UP: %d%% -> %d%%", current_volume, new_volume);
-                    
-                    audio_set_volume(new_volume);
-                    send_volume_update_to_server(new_volume);
-                }
-                
-                last_vol_up_time = current_time;
-            }
-        }
-        
-        // Volume DOWN (GPIO 14) - Active HIGH (button connects to 3.3V)
-        if (vol_down_state == 1) {
-            if (current_time - last_vol_down_time > VOLUME_BUTTON_DEBOUNCE_MS) {
-                ESP_LOGI("VOLUME", "Volume DOWN pressed");
-                
-                if (bt_connected) {
-                    // Bluetooth mode - use A2DP volume control
-                    int current_bt_volume = bt_audio_get_volume_percent();
-                    int new_volume = current_bt_volume - 10;
-                    if (new_volume < 0) new_volume = 0;
-                    
-#if CONFIG_BT_ENABLED
-                    bt_audio_volume_down();
-#endif
-                } else {
-                    // Snapcast mode - use existing snapcast volume control
-                    int current_volume = scSet.volume;  // Use server's current volume
-                    int new_volume = current_volume - 6;
-                    if (new_volume < 0) new_volume = 0;
-                    
-                    ESP_LOGI("SC", "Snapcast Volume DOWN: %d%% -> %d%%", current_volume, new_volume);
-                    
-                    audio_set_volume(new_volume);
-                    send_volume_update_to_server(new_volume);
-                }
-                
-                last_vol_down_time = current_time;
-            }
-        }
-        
-        // Poll every 50ms for responsive button handling
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
-#if CONFIG_ENABLE_SH1106_DISPLAY
-/**
- * WiFi Signal Monitoring Functions
- */
-static void update_wifi_signal_display(void) {
-    // Update the display with current WiFi signal strength
-    display_set_wifi_signal(current_rssi, true);  // Assume connected if we're running
-}
-
-static void wifi_signal_monitor_task(void *pvParameters) {
-    wifi_ap_record_t ap_record;
-    
-    ESP_LOGI("SC", "WiFi signal monitor task started");
-    
-    // Wait for WiFi to be connected before starting monitoring
-    while (1) {
-        wifi_ap_record_t ap_info;
-        esp_err_t ret = esp_wifi_sta_get_ap_info(&ap_info);
-        
-        if (ret == ESP_OK) {
-            ESP_LOGI("SC", "WiFi connected, starting signal monitoring");
-            break;
-        }
-        
-        // WiFi not connected yet, wait and try again
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
-    
-    while (1) {
-        esp_err_t ret = esp_wifi_sta_get_ap_info(&ap_record);
-        
-        if (ret == ESP_OK) {
-            current_rssi = ap_record.rssi;
-            
-            // Log significant RSSI changes
-            static int32_t last_logged_rssi = 0;
-            if (abs(current_rssi - last_logged_rssi) >= 5) {
-                const char* quality = "Unknown";
-                if (current_rssi >= -50) quality = "Excellent";
-                else if (current_rssi >= -60) quality = "Good";
-                else if (current_rssi >= -70) quality = "Fair";
-                else if (current_rssi >= -80) quality = "Poor";
-                else quality = "Very Poor";
-                
-                ESP_LOGI("SC", "WiFi RSSI: %"PRId32" dBm (%s)", current_rssi, quality);
-                last_logged_rssi = current_rssi;
-            }
-            
-            // Update display with current RSSI
-            update_wifi_signal_display();
-            
-        } else {
-            // WiFi disconnected
-            current_rssi = -100;
-            ESP_LOGW("SC", "WiFi disconnected - RSSI unavailable");
-            display_set_wifi_signal(-100, false);  // Show disconnected state
-        }
-        
-        // Update every 3 seconds (balance between responsiveness and overhead)
-        vTaskDelay(pdMS_TO_TICKS(3000));
-    }
-}
-#endif // CONFIG_ENABLE_SH1106_DISPLAY
-
-/**
  *
  */
 void app_main(void) {
@@ -3140,43 +2463,7 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(ret);
 
-  // Load system configuration (Snapclient name, volume buttons, gain boost)
-  system_config_set_defaults(&g_system_config);
-  esp_err_t sys_cfg_ret = system_config_load_from_nvs(&g_system_config);
-  if (sys_cfg_ret == ESP_OK) {
-    ESP_LOGI(TAG,
-             "System config loaded: name='%s', vol_buttons=%s, up=%d, down=%d, gain=%.2f",
-             g_system_config.snapclient_name,
-             g_system_config.volume_buttons_enabled ? "on" : "off",
-             g_system_config.volume_up_pin,
-             g_system_config.volume_down_pin,
-             (double)g_system_config.snapcast_gain_boost);
-        ESP_LOGI(TAG, "Loaded display column offset from NVS: %d",
-             g_system_config.sh1106_column_offset);
-  } else {
-    ESP_LOGI(TAG,
-             "Using default system config: name='%s', vol_buttons=%s, up=%d, down=%d, gain=%.2f",
-             g_system_config.snapclient_name,
-             g_system_config.volume_buttons_enabled ? "on" : "off",
-             g_system_config.volume_up_pin,
-             g_system_config.volume_down_pin,
-             (double)g_system_config.snapcast_gain_boost);
-        ESP_LOGI(TAG, "Using default display column offset: %d",
-             g_system_config.sh1106_column_offset);
-  }
-
-  // Default: show info-level logs globally
   esp_log_level_set("*", ESP_LOG_INFO);
-
-  // Quiet down chatty modules to save CPU/flash and avoid log spam
-  esp_log_level_set("BT_AUDIO_SINK", ESP_LOG_WARN);  // only warnings/errors from Bluetooth sink
-  esp_log_level_set("LED_CTRL", ESP_LOG_WARN);       // suppress per-frame/effect info logs
-  esp_log_level_set("HTTP", ESP_LOG_WARN);           // reduce HTTP/UI chatter
-  esp_log_level_set("SC", ESP_LOG_WARN);             // Snapcast core (buffer/latency/volume spam)
-  esp_log_level_set("SYS_CONFIG", ESP_LOG_WARN);     // system config load/save spam
-  esp_log_level_set("dspProc", ESP_LOG_WARN);        // per-volume DSP logs
-  esp_log_level_set("PLAYER", ESP_LOG_WARN);         // player status logs on every change
-  esp_log_level_set("VOLUME", ESP_LOG_WARN);         // volume button/BT volume logs
 
   // if enabled these cause a timer srv stack overflow
   esp_log_level_set("HEADPHONE", ESP_LOG_NONE);
@@ -3281,54 +2568,14 @@ void app_main(void) {
                      true);  // ensure no noise is sent after firmware crash
 
 #if CONFIG_ENABLE_SH1106_DISPLAY
-  ESP_LOGI("DUAL_OTA", "Initializing SH1106 OLED display");
-  if (!g_system_config.sh1106_enabled) {
-    ESP_LOGI("DUAL_OTA", "SH1106 display disabled by system config");
-  } else {
-    esp_err_t display_ret = display_init_with_i2c(
-        g_system_config.sh1106_sda_gpio,
-        g_system_config.sh1106_scl_gpio,
-        g_system_config.sh1106_i2c_freq_hz);
-    if (display_ret == ESP_OK) {
-      ESP_LOGI("DUAL_OTA", "SH1106 display initialized successfully");
-    
-    // Clear display to remove any previous state
-    ESP_LOGI("DUAL_OTA", "Clearing display and starting display task");
-    display_clear();
-    
-    // Start the display task (crucial for screen updates!)
+  ESP_LOGI(TAG, "Initializing SH1106 display...");
+  esp_err_t display_ret = display_init();
+  if (display_ret == ESP_OK) {
+    ESP_LOGI(TAG, "SH1106 display initialized successfully");
+    display_set_device_name(SNAPCAST_CLIENT_NAME);
     display_task_start();
-    
-    // Set the local device name on the display from system config
-    display_set_device_name(g_system_config.snapclient_name);
-
-    // Apply runtime column offset from system config (0 for 0.96" panels,
-    // 2 for 1.28" SH1106 by convention). This must be set after init,
-    // before regular updates start.
-    extern void display_set_column_offset(int offset);
-    display_set_column_offset(g_system_config.sh1106_column_offset);
-    ESP_LOGI("DISPLAY", "Applied runtime column offset: %d",
-         g_system_config.sh1106_column_offset);
-    
-    // Small delay to let display task initialize
-    vTaskDelay(pdMS_TO_TICKS(100));
-    
-    // Set initial metadata for snapclient mode
-    display_set_song_metadata("Snapclient", "Starting up...", "", "");
-    
-    // Set initial audio status with all bars at baseline level
-    uint8_t initial_eq_levels[16] = {20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20};
-    display_set_audio_levels(initial_eq_levels, 50, false);
-    display_set_snapcast_volume(50); // Set initial snapcast volume
-    display_set_snapcast_mute(false); // Set initial snapcast mute state
-    display_set_connection_status(false);
-    
-    // Force an immediate display update
-    display_update();
-      ESP_LOGI("DUAL_OTA", "Snapclient display content set and updated");
-    } else {
-      ESP_LOGW("DUAL_OTA", "Failed to initialize SH1106 display: %s", esp_err_to_name(display_ret));
-    }
+  } else {
+    ESP_LOGE(TAG, "Failed to initialize SH1106 display: %s", esp_err_to_name(display_ret));
   }
 #endif
 
@@ -3391,10 +2638,6 @@ void app_main(void) {
   init_http_server_task("WIFI_STA_DEF");
 #endif
 
-#ifdef CONFIG_ENABLE_LED_CONTROLLER
-  init_led_controller();
-#endif
-
   // Enable websocket server
   //  ESP_LOGI(TAG, "Setup ws server");
   //  websocket_if_start();
@@ -3418,40 +2661,6 @@ void app_main(void) {
   xTaskCreatePinnedToCore(&http_get_task, "http", 15 * 1024, NULL,
                           HTTP_TASK_PRIORITY, &t_http_get_task,
                           HTTP_TASK_CORE_ID);
-
-#if CONFIG_ENABLE_SH1106_DISPLAY
-  // Start WiFi signal monitoring task
-  ESP_LOGI("DUAL_OTA", "Starting WiFi signal monitoring task");
-  xTaskCreate(wifi_signal_monitor_task, "wifi_signal", 3072, NULL, 2, &wifi_monitor_task_handle);
-  ESP_LOGI("DUAL_OTA", "WiFi signal monitoring started");
-#endif
-
-  // Initialize volume control from system configuration if enabled
-  if (g_system_config.volume_buttons_enabled) {
-    ESP_LOGI("DUAL_OTA",
-             "Audio system ready - initializing volume control (UP=GPIO%d, DOWN=GPIO%d)",
-             g_system_config.volume_up_pin,
-             g_system_config.volume_down_pin);
-    init_volume_buttons();
-    xTaskCreate(volume_button_task, "volume_buttons", 4096, NULL, 1, NULL);
-    ESP_LOGI("DUAL_OTA", "Volume control initialized");
-  } else {
-    ESP_LOGI("DUAL_OTA", "Volume buttons disabled in system configuration");
-  }
-
-#if CONFIG_ENABLE_LED_CONTROLLER
-  // Initialize LED effect toggle button if configured
-  if (g_system_config.effect_button_enabled) {
-    ESP_LOGI("DUAL_OTA", "Initializing LED effect button on GPIO%d", g_system_config.effect_button_pin);
-    init_effect_button();
-    xTaskCreate(effect_button_task, "effect_button", 2048, NULL, 1, NULL);
-  } else {
-    ESP_LOGI("DUAL_OTA", "LED effect button disabled in system configuration");
-  }
-#endif
-
-  // Start AP-mode trigger task using GPIO0 (BOOT button on most boards)
-  xTaskCreate(ap_mode_button_task, "ap_button", 2048, NULL, 2, NULL);
 
   //  while (1) {
   //    // audio_event_iface_msg_t msg;
@@ -3482,44 +2691,5 @@ void app_main(void) {
       }
       dac_data_old = dac_data;
     }
-  }
-}
-
-static void ap_mode_button_task(void *pvParameters) {
-  gpio_config_t io = {
-      .pin_bit_mask = 1ULL << AP_MODE_BUTTON_GPIO,
-      .mode = GPIO_MODE_INPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_ENABLE,
-      .intr_type = GPIO_INTR_DISABLE,
-  };
-  gpio_config(&io);
-
-  const TickType_t poll = pdMS_TO_TICKS(50);
-  uint32_t pressed_ms = 0;
-  bool ap_started_logged = false;
-  ESP_LOGI("AP_BUTTON", "AP button configured on GPIO19 (active-high)");
-
-  while (1) {
-    int level = gpio_get_level(AP_MODE_BUTTON_GPIO);
-    bool pressed = (level == 1); // active-high: HIGH means button pressed
-
-    if (pressed) {
-      pressed_ms += 50;
-      if (pressed_ms >= AP_MODE_HOLD_MS) {
-        ESP_LOGI("AP_BUTTON", "GPIO0 held for %d ms, starting recovery AP mode", AP_MODE_HOLD_MS);
-        wifi_start_ap_mode();
-        if (!ap_started_logged) {
-          ESP_LOGI("AP_BUTTON", "Recovery AP should now be available");
-          ap_started_logged = true;
-        }
-        // After triggering once, keep task running but avoid repeated logs
-        pressed_ms = 0;
-      }
-    } else {
-      pressed_ms = 0;
-    }
-
-    vTaskDelay(poll);
   }
 }

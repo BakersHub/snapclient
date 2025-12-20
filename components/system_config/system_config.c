@@ -1,0 +1,290 @@
+#include "system_config.h"
+
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_log.h"
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+static const char *TAG = "SYS_CONFIG";
+static const char *NVS_NAMESPACE_SYS = "syscfg";
+
+void system_config_set_defaults(system_config_t *config)
+{
+    if (!config) return;
+
+    memset(config, 0, sizeof(*config));
+
+#ifdef CONFIG_ENABLE_VOLUME_BUTTONS
+    config->volume_buttons_enabled = true;
+#else
+    config->volume_buttons_enabled = false;
+#endif
+
+#ifdef CONFIG_VOLUME_UP_PIN
+    config->volume_up_pin = CONFIG_VOLUME_UP_PIN;
+#else
+    config->volume_up_pin = 27;
+#endif
+
+#ifdef CONFIG_VOLUME_DOWN_PIN
+    config->volume_down_pin = CONFIG_VOLUME_DOWN_PIN;
+#else
+    config->volume_down_pin = 14;
+#endif
+
+    // LED effect toggle button disabled by default, default GPIO 18
+    config->effect_button_enabled = false;
+    config->effect_button_pin = 18;
+
+#ifdef CONFIG_SNAPCLIENT_NAME
+    strncpy(config->snapclient_name, CONFIG_SNAPCLIENT_NAME, SYSTEM_CONFIG_MAX_NAME_LEN - 1);
+    config->snapclient_name[SYSTEM_CONFIG_MAX_NAME_LEN - 1] = '\0';
+#else
+    strncpy(config->snapclient_name, "Snapclient", SYSTEM_CONFIG_MAX_NAME_LEN - 1);
+    config->snapclient_name[SYSTEM_CONFIG_MAX_NAME_LEN - 1] = '\0';
+#endif
+
+#ifdef CONFIG_SNAPCAST_GAIN_BOOST
+    config->snapcast_gain_boost = (float)atof(CONFIG_SNAPCAST_GAIN_BOOST);
+    if (config->snapcast_gain_boost <= 0.0f) {
+        config->snapcast_gain_boost = 0.1f;
+    }
+#else
+    config->snapcast_gain_boost = 0.1f;
+#endif
+
+#ifdef CONFIG_WIFI_SSID
+    strncpy(config->wifi_ssid, CONFIG_WIFI_SSID, SYSTEM_CONFIG_MAX_SSID_LEN - 1);
+    config->wifi_ssid[SYSTEM_CONFIG_MAX_SSID_LEN - 1] = '\0';
+#else
+    config->wifi_ssid[0] = '\0';
+#endif
+
+#ifdef CONFIG_WIFI_PASSWORD
+    strncpy(config->wifi_password, CONFIG_WIFI_PASSWORD, SYSTEM_CONFIG_MAX_PASS_LEN - 1);
+    config->wifi_password[SYSTEM_CONFIG_MAX_PASS_LEN - 1] = '\0';
+#else
+    config->wifi_password[0] = '\0';
+#endif
+
+#ifdef CONFIG_SNAPSERVER_HOST
+    strncpy(config->snapserver_host, CONFIG_SNAPSERVER_HOST, SYSTEM_CONFIG_MAX_HOST_LEN - 1);
+    config->snapserver_host[SYSTEM_CONFIG_MAX_HOST_LEN - 1] = '\0';
+#else
+    strncpy(config->snapserver_host, "192.168.1.100", SYSTEM_CONFIG_MAX_HOST_LEN - 1);
+    config->snapserver_host[SYSTEM_CONFIG_MAX_HOST_LEN - 1] = '\0';
+#endif
+
+#ifdef CONFIG_SNAPSERVER_PORT
+    config->snapserver_port = CONFIG_SNAPSERVER_PORT;
+#else
+    config->snapserver_port = 1704;
+#endif
+
+#if CONFIG_ENABLE_SH1106_DISPLAY
+    config->sh1106_enabled = true;
+#else
+    config->sh1106_enabled = false;
+#endif
+
+#ifdef CONFIG_SH1106_I2C_SDA_GPIO
+    config->sh1106_sda_gpio = CONFIG_SH1106_I2C_SDA_GPIO;
+#else
+    config->sh1106_sda_gpio = 21;
+#endif
+
+#ifdef CONFIG_SH1106_I2C_SCL_GPIO
+    config->sh1106_scl_gpio = CONFIG_SH1106_I2C_SCL_GPIO;
+#else
+    config->sh1106_scl_gpio = 22;
+#endif
+
+#ifdef CONFIG_SH1106_I2C_FREQ_HZ
+    config->sh1106_i2c_freq_hz = CONFIG_SH1106_I2C_FREQ_HZ;
+#else
+    config->sh1106_i2c_freq_hz = 400000;
+#endif
+
+    // Default column offset depends on panel type; 2 for classic SH1106, 0 for SSD1306-style
+#ifdef CONFIG_SH1106_COLUMN_OFFSET
+    config->sh1106_column_offset = CONFIG_SH1106_COLUMN_OFFSET;
+#else
+    config->sh1106_column_offset = 2;
+#endif
+}
+
+esp_err_t system_config_load_from_nvs(system_config_t *config)
+{
+    if (!config) return ESP_ERR_INVALID_ARG;
+
+    // Start from compile-time defaults
+    system_config_set_defaults(config);
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE_SYS, NVS_READONLY, &nvs_handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No system config in NVS, using defaults");
+        return ESP_ERR_NOT_FOUND;
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    uint8_t u8;
+    if (nvs_get_u8(nvs_handle, "vol_btn_en", &u8) == ESP_OK) {
+        config->volume_buttons_enabled = (u8 != 0);
+    }
+
+    int32_t i32;
+    if (nvs_get_i32(nvs_handle, "vol_up_pin", &i32) == ESP_OK) {
+        config->volume_up_pin = (int)i32;
+    }
+    if (nvs_get_i32(nvs_handle, "vol_dn_pin", &i32) == ESP_OK) {
+        config->volume_down_pin = (int)i32;
+    }
+
+    if (nvs_get_u8(nvs_handle, "eff_btn_en", &u8) == ESP_OK) {
+        config->effect_button_enabled = (u8 != 0);
+    }
+
+    if (nvs_get_i32(nvs_handle, "eff_btn_pin", &i32) == ESP_OK) {
+        config->effect_button_pin = (int)i32;
+    }
+
+    size_t len = SYSTEM_CONFIG_MAX_NAME_LEN;
+    if (nvs_get_str(nvs_handle, "name", config->snapclient_name, &len) != ESP_OK) {
+        // keep default name
+    }
+
+    char gain_str[16];
+    len = sizeof(gain_str);
+    if (nvs_get_str(nvs_handle, "gain", gain_str, &len) == ESP_OK) {
+        float g = (float)atof(gain_str);
+        if (g > 0.0f && g < 10.0f) {
+            config->snapcast_gain_boost = g;
+        }
+    }
+
+    len = SYSTEM_CONFIG_MAX_SSID_LEN;
+    if (nvs_get_str(nvs_handle, "wifi_ssid", config->wifi_ssid, &len) != ESP_OK) {
+        // keep default SSID
+    }
+
+    len = SYSTEM_CONFIG_MAX_PASS_LEN;
+    if (nvs_get_str(nvs_handle, "wifi_pwd", config->wifi_password, &len) != ESP_OK) {
+        // keep default password
+    }
+
+    len = SYSTEM_CONFIG_MAX_HOST_LEN;
+    if (nvs_get_str(nvs_handle, "srv_host", config->snapserver_host, &len) != ESP_OK) {
+        // keep default host
+    }
+
+    if (nvs_get_i32(nvs_handle, "srv_port", &i32) == ESP_OK && i32 > 0 && i32 <= 65535) {
+        config->snapserver_port = (int)i32;
+    }
+
+    if (nvs_get_u8(nvs_handle, "sh1106_en", &u8) == ESP_OK) {
+        config->sh1106_enabled = (u8 != 0);
+    }
+
+    if (nvs_get_i32(nvs_handle, "sh1106_sda", &i32) == ESP_OK) {
+        config->sh1106_sda_gpio = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "sh1106_scl", &i32) == ESP_OK) {
+        config->sh1106_scl_gpio = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "sh1106_freq", &i32) == ESP_OK && i32 > 0 && i32 <= 1000000) {
+        config->sh1106_i2c_freq_hz = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "sh1106_col", &i32) == ESP_OK && i32 >= 0 && i32 <= 127) {
+        config->sh1106_column_offset = (int)i32;
+    }
+
+    nvs_close(nvs_handle);
+    ESP_LOGI(TAG, "Loaded system config from NVS: name='%s', vol_up=%d, vol_down=%d, gain=%.2f, buttons=%s",
+             config->snapclient_name,
+             config->volume_up_pin,
+             config->volume_down_pin,
+             config->snapcast_gain_boost,
+             config->volume_buttons_enabled ? "on" : "off");
+    return ESP_OK;
+}
+
+esp_err_t system_config_save_to_nvs(const system_config_t *config)
+{
+    if (!config) return ESP_ERR_INVALID_ARG;
+
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE_SYS, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error opening NVS: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = nvs_set_u8(nvs_handle, "vol_btn_en", config->volume_buttons_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "vol_up_pin", (int32_t)config->volume_up_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "vol_dn_pin", (int32_t)config->volume_down_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_u8(nvs_handle, "eff_btn_en", config->effect_button_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "eff_btn_pin", (int32_t)config->effect_button_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "name", config->snapclient_name);
+    if (err != ESP_OK) goto out;
+
+    char gain_str[16];
+    snprintf(gain_str, sizeof(gain_str), "%.3f", (double)config->snapcast_gain_boost);
+    err = nvs_set_str(nvs_handle, "gain", gain_str);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "wifi_ssid", config->wifi_ssid);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "wifi_pwd", config->wifi_password);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "srv_host", config->snapserver_host);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "srv_port", (int32_t)config->snapserver_port);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_u8(nvs_handle, "sh1106_en", config->sh1106_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "sh1106_sda", (int32_t)config->sh1106_sda_gpio);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "sh1106_scl", (int32_t)config->sh1106_scl_gpio);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "sh1106_freq", (int32_t)config->sh1106_i2c_freq_hz);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "sh1106_col", (int32_t)config->sh1106_column_offset);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_commit(nvs_handle);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "System config saved to NVS");
+    } else {
+        ESP_LOGE(TAG, "Failed to commit system config: %s", esp_err_to_name(err));
+    }
+
+out:
+    nvs_close(nvs_handle);
+    return err;
+}

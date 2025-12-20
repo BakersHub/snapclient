@@ -1,5 +1,21 @@
 body {
-  font-family : Arial
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  /* Cool background photo from Unsplash; you can swap this URL */
+  background-image: url('https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1600&q=80');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  color: #f5f5f5;
+}
+
+/* Optional: semi-transparent panel look for main content containers */
+.led-controller,
+.graph-container,
+.graphs-container {
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
 }
 .row {display: table; height: 30px }
 .inrow {display: table-cell; vertical-align: middle }

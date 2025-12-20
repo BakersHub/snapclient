@@ -1,0 +1,6 @@
+## IDF Component Manager Manifest File
+version: "1.0.0"
+description: "Minimal sound-reactive LED controller for WS2812B/SK6812 strips"
+url: https://github.com/yourusername/snapclient-led-controller
+dependencies:
+  idf: ">=4.4"

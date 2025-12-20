@@ -6,17 +6,19 @@
 */
 #include "wifi_interface.h"
 
+#include <string.h>
+#include "system_config.h"
+
 // #include "esp_event.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
 #include "nvs_flash.h"
 
 #if ENABLE_WIFI_PROVISIONING
-#include <string.h>  // for memcpy
-
 #include "wifi_provisioning.h"
 #endif
 
@@ -29,6 +31,8 @@ EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 
 static esp_netif_t *esp_wifi_netif = NULL;
+static esp_netif_t *esp_wifi_ap_netif = NULL;
+static bool s_ap_started = false;
 
 /* The event group allows multiple bits for each event,
    but we only care about one event - are we connected
@@ -49,12 +53,24 @@ static void event_handler(void *arg, esp_event_base_t event_base, int event_id,
     xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
   } else if (event_base == WIFI_EVENT &&
              event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    if ((s_retry_num < WIFI_MAXIMUM_RETRY) || (WIFI_MAXIMUM_RETRY == 0)) {
+    int effective_max_retry = WIFI_MAXIMUM_RETRY;
+    if (effective_max_retry <= 0) {
+      // Treat 0 or negative as a finite default so we can
+      // still fall back to AP mode after some failures.
+      effective_max_retry = 5;
+    }
+
+    if (s_retry_num < effective_max_retry) {
       esp_wifi_connect();
       s_retry_num++;
       ESP_LOGI(TAG, "retry to connect to the AP");
     } else {
       xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+      // Automatic fallback: start recovery AP when STA has failed
+      ESP_LOGW(TAG,
+               "WiFi STA failed after %d retries, starting recovery AP mode",
+               s_retry_num);
+      wifi_start_ap_mode();
     }
     ESP_LOGI(TAG, "connect to the AP fail");
   }
@@ -101,6 +117,22 @@ void wifi_init(void) {
 
   improv_init();
 #else
+  // Load only NVS-backed WiFi credentials (no compile-time defaults here)
+  system_config_t syscfg;
+  memset(&syscfg, 0, sizeof(syscfg));
+  system_config_load_from_nvs(&syscfg);
+
+  bool wifi_configured = (syscfg.wifi_ssid[0] != '\0');
+
+  // If WiFi has never been configured via the web UI, immediately
+  // start the recovery AP so the user can enter credentials.
+  if (!wifi_configured) {
+    ESP_LOGW(TAG,
+             "WiFi SSID not found in NVS system config, starting recovery AP mode");
+    wifi_start_ap_mode();
+    return;
+  }
+
   wifi_config_t wifi_config = {
       .sta =
           {
@@ -111,6 +143,16 @@ void wifi_init(void) {
               .pmf_cfg = {.capable = true, .required = false},
           },
   };
+
+  // Override SSID/password from system_config if present in NVS
+  if (syscfg.wifi_ssid[0] != '\0') {
+    strncpy((char *)wifi_config.sta.ssid, syscfg.wifi_ssid,
+            sizeof(wifi_config.sta.ssid));
+  }
+  if (syscfg.wifi_password[0] != '\0') {
+    strncpy((char *)wifi_config.sta.password, syscfg.wifi_password,
+            sizeof(wifi_config.sta.password));
+  }
 
   /* Start Wi-Fi station */
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -151,3 +193,58 @@ void wifi_init(void) {
 }
 
 esp_netif_t *get_current_netif(void) { return esp_wifi_netif; }
+
+void wifi_start_ap_mode(void) {
+  if (s_ap_started) {
+    ESP_LOGI(TAG, "WiFi AP mode already started");
+    return;
+  }
+
+  // Create default AP netif if not yet created
+  if (esp_wifi_ap_netif == NULL) {
+    esp_wifi_ap_netif = esp_netif_create_default_wifi_ap();
+    if (esp_wifi_ap_netif == NULL) {
+      ESP_LOGE(TAG, "Failed to create default WiFi AP netif");
+      return;
+    }
+  }
+
+  wifi_config_t ap_config = { 0 };
+
+  uint8_t base_mac[6];
+  esp_read_mac(base_mac, ESP_MAC_WIFI_SOFTAP);
+
+  snprintf((char *)ap_config.ap.ssid, sizeof(ap_config.ap.ssid),
+           "ESP32-SNAPCLIENT-%02X%02X%02X",
+           base_mac[3], base_mac[4], base_mac[5]);
+  ap_config.ap.ssid_len = strlen((char *)ap_config.ap.ssid);
+
+  ap_config.ap.channel = 1;
+  ap_config.ap.max_connection = 4;
+    // Open AP (no password)
+    ap_config.ap.password[0] = '\0';
+    ap_config.ap.authmode = WIFI_AUTH_OPEN;
+
+  // Switch to AP+STA mode so existing station connection (if any) is kept
+  esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to set WiFi mode APSTA: %s", esp_err_to_name(err));
+    return;
+  }
+
+  err = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to set AP config: %s", esp_err_to_name(err));
+    return;
+  }
+
+  err = esp_wifi_start();
+  if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+    // ESP_ERR_WIFI_CONN is returned if WiFi is already started; ignore it
+    ESP_LOGE(TAG, "Failed to start WiFi with AP: %s", esp_err_to_name(err));
+    return;
+  }
+
+  s_ap_started = true;
+  ESP_LOGI(TAG, "Recovery SoftAP started, SSID: %s", ap_config.ap.ssid);
+}

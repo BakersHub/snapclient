@@ -1,52 +1,119 @@
 <!DOCTYPE HTML><html>
 <head>
-	<!-- define meta data -->
+	<meta charset="UTF-8">
+	<title>Snapcast Client DSP & LED Control</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<!-- define the style CSS of your page -->
 	<style>
-		html {font-family: Arial; display: inline-block; text-align: center;}
+		html {font-family: Arial, sans-serif; display: inline-block; text-align: center;}
+		body {
+			margin: 0;
+			padding: 20px 0;
+			background-image: url('https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=1600&q=80');
+			background-size: cover;
+			background-position: center;
+			background-attachment: fixed;
+			color: #f5f5f5;
+		}
+
+		.headline_container {
+			max-width: 500px;
+			margin: 20px auto 10px auto;
+			padding: 15px 20px;
+			background: rgba(0,0,0,0.9);
+			border-radius: 8px;
+		}
+
+		.body_container {
+			max-width: 500px;
+			margin: 0 auto 30px auto;
+			padding: 20px;
+			background: rgba(0,0,0,0.9);
+			border-radius: 8px;
+		}
 		h1 {font-size: 2.9rem;}
 		h2 {font-size: 2.1rem;}
 		p {font-size: 1.9rem;}
 
 		.slider {
-				writing-mode: bt-lr; /* IE */
-				-webkit-appearance: slider-vertical; /* Chromium */
-				margin: 14px;
-				width: 15px;
-				height: 200px;
-				border-radius: 5px;
-				background: #39a6de;
-				outline: none;
-				-webkit-transition: .2s;
-				transition: opacity .2s;
-			}
-		.slider::-webkit-slider-thumb 	{
-							-webkit-appearance: none;
-							appearance: none;
-							width: 25px;
-							height: 25px;
-							border-radius: 12px;
-							background: #f74d4d;
-							cursor: pointer;
-						}
-		.slider::-moz-range-thumb 	{
-							width: 25px;
-							height: 25px;
-							border-radius: 12px;
-							background: #F74D4D;
-							cursor: pointer;
-						}
+			writing-mode: bt-lr; /* IE */
+			-webkit-appearance: slider-vertical; /* Chromium */
+			appearance: slider-vertical;
+			margin: 14px;
+			width: 15px;
+			height: 200px;
+			border-radius: 5px;
+			background: #39a6de;
+			outline: none;
+			-webkit-transition: .2s;
+			transition: opacity .2s;
+		}
+		.slider::-webkit-slider-thumb {
+			-webkit-appearance: none;
+			appearance: none;
+			width: 25px;
+			height: 25px;
+			border-radius: 12px;
+			background: #f74d4d;
+			cursor: pointer;
+		}
+		.slider::-moz-range-thumb {
+			width: 25px;
+			height: 25px;
+			border-radius: 12px;
+			background: #F74D4D;
+			cursor: pointer;
+		}
+		.led-controller {
+			background: rgba(0,0,0,0.9);
+			padding: 20px;
+			margin: 30px auto;
+			max-width: 500px;
+			border-radius: 8px;
+			box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+		}
+		.led-control-group {
+			margin: 15px 0;
+			text-align: left;
+		}
+		.led-control-group label {
+			display: inline-block;
+			width: 120px;
+			font-weight: bold;
+			font-size: 1rem;
+		}
+		.led-control-group input[type="range"] {
+			width: 200px;
+			vertical-align: middle;
+		}
+		.led-control-group select,
+		.led-control-group input[type="number"],
+		.led-control-group input[type="color"] {
+			padding: 5px;
+			font-size: 14px;
+			width: 220px;
+		}
+		.led-status {
+			margin-top: 10px;
+			padding: 10px;
+			background: #e8f5e9;
+			border-radius: 4px;
+			min-height: 20px;
+			color: #2e7d32;
+			font-size: 0.9rem;
+		}
 	</style>
 </head>
 <body>
-	<!-- Displays the range of the slider from -6 to 6 in steps of 0.1 -->
-
 	<div class="headline_container">
-		<h1>DSP processor filter configuration</h1>
+		<h1><span id="deviceNameHeading">Snapclient</span> Setup & LED Control</h1>
+		<p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #cccccc;">
+			Made thanks to BakersHub, luar123, CarlosDerSeher & many other contributors to Snapcast
+		</p>
 	</div>
 
 	<div class="body_container" style="max-width: 500px; margin:0px auto; padding-bottom: 30px;">
+		<h2>💾 DSP Filter Configuration</h2>
+		<p style="font-size: 0.9rem; color: #888;">Changes will be saved to flash and persist after restart</p>
 		<div class="range_container">
 			<div class="range_1_container" style="float:left; margin:10px">
 			    <div class="sliders_labels">
@@ -64,7 +131,7 @@
 
 			<div class="range_2_container" style="float:left; margin:10px">
 			    <div class="sliders_labels">
-			        <label for="MidGainSlider"">Mids</label>
+			        <label for="MidGainSlider">Mids</label>
 			    </div>
 
 			    <div class="sliders_control">
@@ -90,17 +157,338 @@
 			    </div>
 			</div>
 		</div>
+		<div style="clear: both;"></div>
+	</div>
+	
+	<!-- LED Controller Section -->
+	<div class="led-controller" id="ledController">
+		<h2>🎵 Sound-Reactive LEDs</h2>
+		
+		<h3 style="margin-top: 20px; color: #666;">💾 Persistent Configuration</h3>
+		<p style="font-size: 0.9rem; color: #888;">Changes below will be saved to flash and persist after restart</p>
+		
+		<div class="led-control-group">
+			<label for="cfgNumLeds">Number of LEDs:</label>
+			<input type="number" id="cfgNumLeds" min="1" max="1000" value="100">
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgGpioPin">GPIO Pin:</label>
+			<input type="number" id="cfgGpioPin" min="0" max="39" value="23">
+		</div>
+
+		<div class="led-control-group">
+			<label for="cfgColorOrder">Color Order:</label>
+			<select id="cfgColorOrder">
+				<option value="0">RGB</option>
+				<option value="1">GRB</option>
+			</select>
+		</div>
+
+		<div class="led-control-group">
+			<label for="cfgLedEnable">Enable LED Controller:</label>
+			<input type="checkbox" id="cfgLedEnable" checked>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultBrightness">Default Brightness:</label>
+			<input type="range" id="cfgDefaultBrightness" min="0" max="255" value="128">
+			<span id="cfgBrightnessVal">128</span>
+		</div>
+
+		<div class="led-control-group">
+			<label for="cfgAutoRainbow">Rainbow Color 1 (default):</label>
+			<input type="checkbox" id="cfgAutoRainbow">
+			<label for="cfgRainbowSpeed" style="margin-left: 10px;">Rainbow Speed:</label>
+			<input type="range" id="cfgRainbowSpeed" min="0" max="255" value="128" style="width: 150px;">
+		</div>
+
+		<div class="led-control-group">
+			<label for="cfgAutoRainbow2">Rainbow Color 2 (default):</label>
+			<input type="checkbox" id="cfgAutoRainbow2">
+			<label for="cfgRainbowSpeed2" style="margin-left: 10px;">Rainbow Speed:</label>
+			<input type="range" id="cfgRainbowSpeed2" min="0" max="255" value="128" style="width: 150px;">
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultEffect">Default Effect:</label>
+			<select id="cfgDefaultEffect">
+				<option value="0">Off</option>
+				<option value="1">VU Meter</option>
+				<option value="2">Spectrum Analyzer</option>
+				<option value="3">Pulse</option>
+				<option value="4">Wave</option>
+				<option value="5">Energy Bar</option>
+				<option value="6">Rainbow Pulse</option>
+				<option value="7">Beat Flash</option>
+				<option value="8">Bass Pulse</option>
+				<option value="9">Stereo VU</option>
+				<option value="10">Solid Color</option>
+				<option value="11">Color Wipe</option>
+				<option value="12">Dual Color Wave</option>
+				<option value="13">Comet</option>
+				<option value="14">Sparkle</option>
+				<option value="15">Beat Rainbow</option>
+				<option value="16">Multi Comet</option>
+				<option value="17">Marching</option>
+				<option value="18">Blade Power+</option>
+				<option value="19">Scan Multi</option>
+				<option value="20">Pitch Spectrum</option>
+				<option value="21">Equalizer</option>
+				<option value="22">Dual Energy Bar</option>
+				<option value="23">Beat Strobe</option>
+				<option value="24">Energy Comet</option>
+				<option value="25">Fire Flicker</option>
+				<option value="26">Center Ripples</option>
+				<option value="27">Rainbow Plasma</option>
+				<option value="28">Noise Plasma</option>
+			</select>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultSpeed">Default Speed:</label>
+			<input type="range" id="cfgDefaultSpeed" min="0" max="255" value="128">
+			<span id="cfgSpeedVal">128</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="cfgDefaultSensitivity">Default Sensitivity:</label>
+			<input type="range" id="cfgDefaultSensitivity" min="0" max="255" value="150">
+			<span id="cfgSensitivityVal">150</span>
+		</div>
+
+		<div class="led-control-group">
+			<label for="cfgDefaultBassFocus">Default Bass Focus:</label>
+			<input type="range" id="cfgDefaultBassFocus" min="0" max="255" value="128">
+			<span id="cfgBassFocusVal">128</span>
+			<span style="display:block; font-size: 0.8rem; color: #888; margin-top: 4px;">
+				Controls how strongly low frequencies (bass) drive the LED effects. Higher values make bass hits dominate the visuals; lower values make mids/highs more visible.
+			</span>
+		</div>
+
+		<div class="led-control-group">
+			<label for="cfgIgnoreVolume">Ignore Playback Volume (Auto Gain):</label>
+			<input type="checkbox" id="cfgIgnoreVolume">
+			<span style="display:block; font-size: 0.8rem; color: #888; margin-top: 4px;">
+				When enabled, LED effects react to the raw audio signal and ignore the player volume, keeping visual intensity consistent even at low listening levels.
+			</span>
+		</div>
+		
+		<button onclick="saveLEDConfig()" style="margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
+			💾 Save Configuration & Restart
+		</button>
+		
+		<h3 style="margin-top: 30px; color: #666;">🎨 Live Controls</h3>
+		<p style="font-size: 0.9rem; color: #888;">Changes below take effect immediately (not saved)</p>
+		
+		<div class="led-control-group">
+			<label for="ledEffect">Effect:</label>
+			<select id="ledEffect" onchange="updateLED()">
+				<option value="0">Off</option>
+				<option value="1">VU Meter</option>
+				<option value="2">Spectrum Analyzer</option>
+				<option value="3">Pulse</option>
+				<option value="4">Wave</option>
+				<option value="5">Energy Bar</option>
+				<option value="6">Rainbow Pulse</option>
+				<option value="7">Beat Flash</option>
+				<option value="8">Bass Pulse</option>
+				<option value="9">Stereo VU</option>
+				<option value="10">Solid Color</option>
+				<option value="11">Color Wipe</option>
+				<option value="12">Dual Color Wave</option>
+				<option value="13">Comet</option>
+				<option value="14">Sparkle</option>
+				<option value="15">Beat Rainbow</option>
+				<option value="16">Multi Comet</option>
+				<option value="17">Marching</option>
+				<option value="18">Blade Power+</option>
+				<option value="19">Scan Multi</option>
+				<option value="20">Pitch Spectrum</option>
+				<option value="21">Equalizer</option>
+				<option value="22">Dual Energy Bar</option>
+				<option value="23">Beat Strobe</option>
+				<option value="24">Energy Comet</option>
+				<option value="25">Fire Flicker</option>
+				<option value="26">Center Ripples</option>
+				<option value="27">Rainbow Plasma</option>
+				<option value="28">Noise Plasma</option>
+			</select>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="ledBrightness">Brightness:</label>
+			<input type="range" id="ledBrightness" min="0" max="255" value="128" oninput="updateLED()">
+			<span id="brightnessValue">128</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="ledSpeed">Speed:</label>
+			<input type="range" id="ledSpeed" min="0" max="255" value="128" oninput="updateLED()">
+			<span id="speedValue">128</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="ledSensitivity">Sensitivity:</label>
+			<input type="range" id="ledSensitivity" min="0" max="255" value="150" oninput="updateLED()">
+			<span id="sensitivityValue">150</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="ledBassFocus">Bass Focus:</label>
+			<input type="range" id="ledBassFocus" min="0" max="255" value="128" oninput="updateLED()">
+			<span id="bassFocusValue">128</span>
+		</div>
+		
+		<div class="led-control-group">
+			<label for="ledColor">Color 1:</label>
+			<input type="color" id="ledColor" value="#ff0000" onchange="updateLED()">
+		</div>
+		<div class="led-control-group">
+			<label for="ledAutoRainbow">Rainbow Color 1 (live):</label>
+			<input type="checkbox" id="ledAutoRainbow" onchange="updateLED()">
+			<label for="ledRainbowSpeed" style="margin-left: 10px;">Rainbow Speed:</label>
+			<input type="range" id="ledRainbowSpeed" min="0" max="255" value="128" oninput="updateLED()" style="width: 150px;">
+		</div>
+		<div class="led-control-group">
+			<label for="ledColor2">Color 2:</label>
+			<input type="color" id="ledColor2" value="#0000ff" onchange="updateLED()">
+		</div>
+		<div class="led-control-group">
+			<label for="ledAutoRainbow2">Rainbow Color 2 (live):</label>
+			<input type="checkbox" id="ledAutoRainbow2" onchange="updateLED()">
+			<label for="ledRainbowSpeed2" style="margin-left: 10px;">Rainbow Speed:</label>
+			<input type="range" id="ledRainbowSpeed2" min="0" max="255" value="128" oninput="updateLED()" style="width: 150px;">
+		</div>
+		
+		<div class="led-status" id="ledStatus">Ready</div>
+	</div>
+
+	<!-- System / Device Configuration Section -->
+	<div class="led-controller" id="systemController">
+		<h2>⚙️ System & Device Configuration</h2>
+		<p style="font-size: 0.9rem; color: #888;">These settings control WiFi, Snapserver, device name, Snapcast gain, hardware volume buttons and SH1106 OLED display</p>
+
+		<div class="led-control-group">
+			<label for="sysWifiSsid">WiFi SSID:</label>
+			<input type="text" id="sysWifiSsid" maxlength="31" placeholder="myssid">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysWifiPassword">WiFi Password:</label>
+			<input type="text" id="sysWifiPassword" maxlength="63" placeholder="mypassword">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysSnapHost">Snapserver Host (IP):</label>
+			<input type="text" id="sysSnapHost" maxlength="63" placeholder="192.168.0.30">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysSnapPort">Snapserver Port:</label>
+			<input type="number" id="sysSnapPort" min="1" max="65535" value="1704">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysName">Device / Snapclient Name:</label>
+			<input type="text" id="sysName" maxlength="31" placeholder="Snapclient">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysGainBoost">Snapcast Gain Boost:</label>
+			<input type="number" id="sysGainBoost" min="0.1" max="10" step="0.1" value="1.0">
+			<span style="margin-left: 6px; font-size: 0.8rem; color: #ccc;">Notes 👉</span>
+			<button type="button" onclick="toggleGainHelp()" title="Gain boost help" style="margin-left: 4px; padding: 2px 6px; font-size: 0.8rem; cursor: pointer;">📎</button>
+		</div>
+
+		<div id="gainHelpPanel" style="display:none; text-align:left; font-size:0.8rem; color:#ccc; background:rgba(0,0,0,0.6); padding:8px 10px; border-radius:4px; margin:-8px 0 8px 0;">
+			<strong>Snapcast Gain Boost notes</strong><br>
+	
+			<b>How it works:</b><br>
+			Gain 0.5: reduced max volume for small speakers that are getting overpowered.<br><br>
+			Gain 1 (default): Audio plays at its original level.<br>
+			Gain 2: The audio signal is multiplied by 2 (doubling the waveform amplitude).<br><br>
+			<b>Important notes:</b><br>
+			Perceived loudness: Doubling amplitude does not double perceived loudness. Roughly +10 dB (~3.16× gain) sounds “twice as loud”.<br>
+			Clipping risk: If the signal is already near maximum, multiplying by 2 can clip and distort.<br>
+			System volume: This gain just multiplies the signal; extra DAC/amp gain can easily overdrive hardware.<br><br>
+			✅ Rule of thumb: Increase gain gradually (e.g. 1.0 → 1.2 → 1.5) and listen for distortion rather than jumping straight to high values.
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysVolButtons">Enable Volume Buttons:</label>
+			<input type="checkbox" id="sysVolButtons" checked>
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysVolUpPin">Volume Up GPIO:</label>
+			<input type="number" id="sysVolUpPin" min="0" max="39" value="27">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysVolDownPin">Volume Down GPIO:</label>
+			<input type="number" id="sysVolDownPin" min="0" max="39" value="14">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysEffectButton">Enable LED ON/OFF Effect Button:</label>
+			<input type="checkbox" id="sysEffectButton">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysEffectButtonPin">LED ON/OFF Effect Button GPIO:</label>
+			<input type="number" id="sysEffectButtonPin" min="0" max="39" value="33">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysDisplayEnable">Enable OLED Display:</label>
+			<input type="checkbox" id="sysDisplayEnable" checked>
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysI2cSda">I2C SDA GPIO:</label>
+			<input type="number" id="sysI2cSda" min="0" max="39" value="21">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysI2cScl">I2C SCL GPIO:</label>
+			<input type="number" id="sysI2cScl" min="0" max="39" value="22">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysI2cFreq">I2C Frequency (Hz):</label>
+			<input type="number" id="sysI2cFreq" min="10000" max="1000000" step="10000" value="400000">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysDisplaySize">Display Size:</label>
+			<select id="sysDisplaySize">
+				<option value="128">1.28\" SH1106 128x64 (column 2)</option>
+				<option value="96">0.96\" SSD1306 128x64 (column 0)</option>
+			</select>
+			<span style="display:block; font-size: 0.8rem; color: #888; margin-top: 4px;">
+				Horizontal column offset for the panel. Classic SH1106 1.28&quot; modules typically use 2, while many 0.96&quot; SSD1306 128x64 modules use 0.
+			</span>
+		</div>
+
+		<button onclick="saveSystemConfig()" style="margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
+			💾 Save System Config & Restart
+		</button>
+
+		<div class="led-status" id="systemStatus">Ready</div>
+	</div>
 
 	<script>
+		// DSP Processor Functions
 		function sendUpdateSlider() {
 			var gain_1 = document.getElementById('BaseGainSlider').value;
 			var gain_2 = document.getElementById('MidGainSlider').value;
 			var gain_3 = document.getElementById('heightsGainSlider').value;
 
 			console.log(gain_1 + ", " + gain_2 + ", " + gain_3);
-			console.log("/post?gain_1=" + gain_1 + "&gain_2= " + gain_2 + "&gain_3=" + gain_3	);
+			console.log("/post?gain_1=" + gain_1 + "&gain_2=" + gain_2 + "&gain_3=" + gain_3);
 			var httpRequest = new XMLHttpRequest();
-			httpRequest.open("POST", "/post?gain_1=" + gain_1 + "&gain_2= " + gain_2 + "&gain_3=" + gain_3, true);
+			httpRequest.open("POST", "/post?gain_1=" + gain_1 + "&gain_2=" + gain_2 + "&gain_3=" + gain_3, true);
 			httpRequest.send();
 		}
 
@@ -108,6 +496,383 @@
 			var output = document.getElementById(id);
 			output.innerHTML = val;
 		}
+
+		function loadDspConfig() {
+			fetch('/dsp/config')
+				.then(response => {
+					if (!response.ok) {
+						throw new Error('HTTP ' + response.status);
+					}
+					return response.json();
+				})
+				.then(data => {
+					if (typeof data.gain1 !== 'undefined') {
+						var gain1 = parseFloat(data.gain1);
+						if (!isNaN(gain1)) {
+							var baseSlider = document.getElementById('BaseGainSlider');
+							baseSlider.value = gain1.toFixed(2);
+							updateSlider('baseSliderValue', baseSlider.value);
+						}
+					}
+					if (typeof data.gain2 !== 'undefined') {
+						var gain2 = parseFloat(data.gain2);
+						if (!isNaN(gain2)) {
+							var midSlider = document.getElementById('MidGainSlider');
+							midSlider.value = gain2.toFixed(2);
+							updateSlider('midsSliderValue', midSlider.value);
+						}
+					}
+					if (typeof data.gain3 !== 'undefined') {
+						var gain3 = parseFloat(data.gain3);
+						if (!isNaN(gain3)) {
+							var heightsSlider = document.getElementById('heightsGainSlider');
+							heightsSlider.value = gain3.toFixed(2);
+							updateSlider('heightsSliderValue', heightsSlider.value);
+						}
+					}
+				})
+				.catch(error => {
+					console.log('DSP config not available', error);
+				});
+		}
+
+		// LED Controller Functions
+		function updateBrightnessDisplay() {
+			document.getElementById('brightnessValue').textContent = document.getElementById('ledBrightness').value;
+		}
+		
+		function updateSpeedDisplay() {
+			document.getElementById('speedValue').textContent = document.getElementById('ledSpeed').value;
+		}
+		
+		function updateSensitivityDisplay() {
+			document.getElementById('sensitivityValue').textContent = document.getElementById('ledSensitivity').value;
+		}
+		
+		function updateConfigDisplays() {
+			document.getElementById('cfgBrightnessVal').textContent = document.getElementById('cfgDefaultBrightness').value;
+			document.getElementById('cfgSpeedVal').textContent = document.getElementById('cfgDefaultSpeed').value;
+			document.getElementById('cfgSensitivityVal').textContent = document.getElementById('cfgDefaultSensitivity').value;
+			document.getElementById('cfgBassFocusVal').textContent = document.getElementById('cfgDefaultBassFocus').value;
+		}
+		
+		// Update config value displays
+		document.getElementById('cfgDefaultBrightness').oninput = updateConfigDisplays;
+		document.getElementById('cfgDefaultSpeed').oninput = updateConfigDisplays;
+		document.getElementById('cfgDefaultSensitivity').oninput = updateConfigDisplays;
+		document.getElementById('cfgDefaultBassFocus').oninput = updateConfigDisplays;
+		
+		function hexToRgb(hex) {
+			var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+			return result ? {
+				r: parseInt(result[1], 16),
+				g: parseInt(result[2], 16),
+				b: parseInt(result[3], 16)
+			} : null;
+		}
+		
+		function updateLED() {
+			var rgb = hexToRgb(document.getElementById('ledColor').value);
+			var rgb2 = hexToRgb(document.getElementById('ledColor2').value);
+			var brightness = document.getElementById('ledBrightness').value;
+			var speed = document.getElementById('ledSpeed').value;
+			var sensitivity = document.getElementById('ledSensitivity').value;
+			var bassFocus = document.getElementById('ledBassFocus').value;
+			var autoRainbow = document.getElementById('ledAutoRainbow').checked ? '1' : '0';
+			var rainbowSpeed = document.getElementById('ledRainbowSpeed').value;
+			var autoRainbow2 = document.getElementById('ledAutoRainbow2').checked ? '1' : '0';
+			var rainbowSpeed2 = document.getElementById('ledRainbowSpeed2').value;
+			
+			updateBrightnessDisplay();
+			updateSpeedDisplay();
+			updateSensitivityDisplay();
+			document.getElementById('bassFocusValue').textContent = bassFocus;
+			
+			var params = 'effect=' + document.getElementById('ledEffect').value +
+					'&brightness=' + brightness +
+					'&speed=' + speed +
+					'&sensitivity=' + sensitivity +
+					'&bass_focus=' + bassFocus +
+					'&auto_rainbow=' + autoRainbow +
+					'&rainbow_speed=' + rainbowSpeed +
+					'&auto_rainbow2=' + autoRainbow2 +
+					'&rainbow_speed2=' + rainbowSpeed2 +
+					'&color=' + rgb.r + ',' + rgb.g + ',' + rgb.b +
+					'&color2=' + rgb2.r + ',' + rgb2.g + ',' + rgb2.b;
+			
+			document.getElementById('ledStatus').textContent = 'Updating...';
+			
+			fetch('/led', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/x-www-form-urlencoded',
+				},
+				body: params
+			})
+			.then(response => response.text())
+			.then(data => {
+				document.getElementById('ledStatus').textContent = '✓ ' + data;
+			})
+			.catch(error => {
+				document.getElementById('ledStatus').textContent = '✗ Error: ' + error;
+			});
+		}
+		
+		function saveLEDConfig() {
+			var rainbowSpeed = document.getElementById('cfgRainbowSpeed').value;
+			var rainbowSpeed2 = document.getElementById('cfgRainbowSpeed2').value;
+			var bassFocusDefault = document.getElementById('cfgDefaultBassFocus').value;
+			var params = 'num_leds=' + document.getElementById('cfgNumLeds').value +
+					'&gpio_pin=' + document.getElementById('cfgGpioPin').value +
+					'&enabled=' + (document.getElementById('cfgLedEnable').checked ? '1' : '0') +
+					'&color_order=' + document.getElementById('cfgColorOrder').value +
+					'&ignore_volume=' + (document.getElementById('cfgIgnoreVolume').checked ? '1' : '0') +
+					'&auto_rainbow=' + (document.getElementById('cfgAutoRainbow').checked ? '1' : '0') +
+					'&rainbow_speed=' + rainbowSpeed +
+					'&auto_rainbow2=' + (document.getElementById('cfgAutoRainbow2').checked ? '1' : '0') +
+					'&rainbow_speed2=' + rainbowSpeed2 +
+					'&bass_focus=' + bassFocusDefault +
+					'&brightness=' + document.getElementById('cfgDefaultBrightness').value +
+					'&effect=' + document.getElementById('cfgDefaultEffect').value +
+					'&speed=' + document.getElementById('cfgDefaultSpeed').value +
+					'&sensitivity=' + document.getElementById('cfgDefaultSensitivity').value +
+					'&color=' + hexToRgb(document.getElementById('ledColor').value).r + ',' +
+					              hexToRgb(document.getElementById('ledColor').value).g + ',' +
+					              hexToRgb(document.getElementById('ledColor').value).b +
+					'&color2=' + hexToRgb(document.getElementById('ledColor2').value).r + ',' +
+					               hexToRgb(document.getElementById('ledColor2').value).g + ',' +
+					               hexToRgb(document.getElementById('ledColor2').value).b;
+			
+			document.getElementById('ledStatus').textContent = '💾 Saving configuration...';
+			document.getElementById('ledStatus').style.background = '#fff3cd';
+			document.getElementById('ledStatus').style.color = '#856404';
+			
+			fetch('/led/config', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/x-www-form-urlencoded',
+				},
+				body: params
+			})
+			.then(response => response.text())
+			.then(data => {
+				document.getElementById('ledStatus').textContent = '✓ ' + data;
+				document.getElementById('ledStatus').style.background = '#d4edda';
+				document.getElementById('ledStatus').style.color = '#155724';
+			})
+			.catch(error => {
+				document.getElementById('ledStatus').textContent = '✗ Error: ' + error;
+				document.getElementById('ledStatus').style.background = '#ffebee';
+				document.getElementById('ledStatus').style.color = '#c62828';
+			});
+		}
+		
+		function loadLEDConfig() {
+			fetch('/led')
+				.then(response => response.json())
+				.then(data => {
+					// Load live controls
+					document.getElementById('ledEffect').value = data.effect;
+					document.getElementById('ledBrightness').value = data.brightness;
+					document.getElementById('ledSpeed').value = data.speed;
+					document.getElementById('ledSensitivity').value = data.sensitivity;
+					if (typeof data.bass_focus !== 'undefined') {
+						document.getElementById('ledBassFocus').value = data.bass_focus;
+					}
+					document.getElementById('ledAutoRainbow').checked = !!data.auto_rainbow;
+					if (typeof data.auto_rainbow2 !== 'undefined') {
+						document.getElementById('ledAutoRainbow2').checked = !!data.auto_rainbow2;
+					}
+					if (typeof data.rainbow_speed !== 'undefined') {
+						document.getElementById('ledRainbowSpeed').value = data.rainbow_speed;
+					}
+					if (typeof data.rainbow_speed2 !== 'undefined') {
+						document.getElementById('ledRainbowSpeed2').value = data.rainbow_speed2;
+					}
+					
+					// Load config values
+					document.getElementById('cfgNumLeds').value = data.num_leds;
+					document.getElementById('cfgGpioPin').value = 23; // Will come from backend later
+					if (typeof data.enabled !== 'undefined') {
+						document.getElementById('cfgLedEnable').checked = !!data.enabled;
+					}
+					if (typeof data.color_order !== 'undefined') {
+						document.getElementById('cfgColorOrder').value = data.color_order;
+					}
+					if (typeof data.ignore_volume !== 'undefined') {
+						document.getElementById('cfgIgnoreVolume').checked = !!data.ignore_volume;
+					}
+					if (typeof data.bass_focus !== 'undefined') {
+						document.getElementById('cfgDefaultBassFocus').value = data.bass_focus;
+					}
+					if (typeof data.auto_rainbow !== 'undefined') {
+						document.getElementById('cfgAutoRainbow').checked = !!data.auto_rainbow;
+					}
+					if (typeof data.auto_rainbow2 !== 'undefined') {
+						document.getElementById('cfgAutoRainbow2').checked = !!data.auto_rainbow2;
+					}
+					if (typeof data.rainbow_speed !== 'undefined') {
+						document.getElementById('cfgRainbowSpeed').value = data.rainbow_speed;
+					}
+					if (typeof data.rainbow_speed2 !== 'undefined') {
+						document.getElementById('cfgRainbowSpeed2').value = data.rainbow_speed2;
+					}
+					document.getElementById('cfgDefaultBrightness').value = data.brightness;
+					document.getElementById('cfgDefaultEffect').value = data.effect;
+					document.getElementById('cfgDefaultSpeed').value = data.speed;
+					document.getElementById('cfgDefaultSensitivity').value = data.sensitivity;
+					
+					var hex = '#' + 
+							('0' + data.color.r.toString(16)).slice(-2) +
+							('0' + data.color.g.toString(16)).slice(-2) +
+							('0' + data.color.b.toString(16)).slice(-2);
+					document.getElementById('ledColor').value = hex;
+
+					// Secondary color (if provided)
+					if (data.color2) {
+						var hex2 = '#' +
+							('0' + data.color2.r.toString(16)).slice(-2) +
+							('0' + data.color2.g.toString(16)).slice(-2) +
+							('0' + data.color2.b.toString(16)).slice(-2);
+						document.getElementById('ledColor2').value = hex2;
+					}
+					
+					updateBrightnessDisplay();
+					updateSpeedDisplay();
+					updateSensitivityDisplay();
+					updateConfigDisplays();
+					
+					document.getElementById('ledStatus').textContent = 'Connected (' + data.num_leds + ' LEDs)';
+				})
+				.catch(error => {
+					document.getElementById('ledController').style.display = 'none';
+					console.log('LED controller not available');
+				});
+		}
+
+		function loadSystemConfig() {
+			fetch('/system/config')
+				.then(response => response.json())
+				.then(data => {
+					if (data.wifi_ssid) {
+						document.getElementById('sysWifiSsid').value = data.wifi_ssid;
+					}
+					if (typeof data.wifi_password !== 'undefined') {
+						document.getElementById('sysWifiPassword').value = data.wifi_password;
+					}
+					if (data.snapserver_host) {
+						document.getElementById('sysSnapHost').value = data.snapserver_host;
+					}
+					if (typeof data.snapserver_port !== 'undefined') {
+						document.getElementById('sysSnapPort').value = data.snapserver_port;
+					}
+					if (data.snapclient_name) {
+						document.getElementById('sysName').value = data.snapclient_name;
+						var headingNameEl = document.getElementById('deviceNameHeading');
+						if (headingNameEl) {
+							headingNameEl.textContent = data.snapclient_name;
+						}
+					}
+					if (typeof data.snapcast_gain_boost !== 'undefined') {
+						document.getElementById('sysGainBoost').value = data.snapcast_gain_boost;
+					}
+					if (typeof data.volume_buttons_enabled !== 'undefined') {
+						document.getElementById('sysVolButtons').checked = !!data.volume_buttons_enabled;
+					}
+					if (typeof data.volume_up_pin !== 'undefined') {
+						document.getElementById('sysVolUpPin').value = data.volume_up_pin;
+					}
+					if (typeof data.volume_down_pin !== 'undefined') {
+						document.getElementById('sysVolDownPin').value = data.volume_down_pin;
+					}
+					if (typeof data.effect_button_enabled !== 'undefined') {
+						document.getElementById('sysEffectButton').checked = !!data.effect_button_enabled;
+					}
+					if (typeof data.effect_button_pin !== 'undefined') {
+						document.getElementById('sysEffectButtonPin').value = data.effect_button_pin;
+					}
+					if (typeof data.sh1106_enabled !== 'undefined') {
+						document.getElementById('sysDisplayEnable').checked = !!data.sh1106_enabled;
+					}
+					if (typeof data.sh1106_sda_gpio !== 'undefined') {
+						document.getElementById('sysI2cSda').value = data.sh1106_sda_gpio;
+					}
+					if (typeof data.sh1106_scl_gpio !== 'undefined') {
+						document.getElementById('sysI2cScl').value = data.sh1106_scl_gpio;
+					}
+					if (typeof data.sh1106_i2c_freq_hz !== 'undefined') {
+						document.getElementById('sysI2cFreq').value = data.sh1106_i2c_freq_hz;
+					}
+					if (typeof data.sh1106_column_offset !== 'undefined') {
+						// Map column offset back to display size selection
+						if (data.sh1106_column_offset === 0) {
+							document.getElementById('sysDisplaySize').value = '96';
+						} else {
+							document.getElementById('sysDisplaySize').value = '128';
+						}
+					}
+					document.getElementById('systemStatus').textContent = 'System config loaded';
+				})
+				.catch(error => {
+					console.log('System config not available', error);
+					document.getElementById('systemController').style.display = 'none';
+				});
+		}
+
+		function saveSystemConfig() {
+			var params = 'snapclient_name=' + encodeURIComponent(document.getElementById('sysName').value) +
+				'&snapcast_gain_boost=' + encodeURIComponent(document.getElementById('sysGainBoost').value) +
+				'&wifi_ssid=' + encodeURIComponent(document.getElementById('sysWifiSsid').value) +
+				'&wifi_password=' + encodeURIComponent(document.getElementById('sysWifiPassword').value) +
+				'&snapserver_host=' + encodeURIComponent(document.getElementById('sysSnapHost').value) +
+				'&snapserver_port=' + encodeURIComponent(document.getElementById('sysSnapPort').value) +
+				'&volume_buttons_enabled=' + (document.getElementById('sysVolButtons').checked ? '1' : '0') +
+				'&volume_up_pin=' + document.getElementById('sysVolUpPin').value +
+				'&volume_down_pin=' + document.getElementById('sysVolDownPin').value +
+				'&effect_button_enabled=' + (document.getElementById('sysEffectButton').checked ? '1' : '0') +
+				'&effect_button_pin=' + document.getElementById('sysEffectButtonPin').value +
+				'&sh1106_enabled=' + (document.getElementById('sysDisplayEnable').checked ? '1' : '0') +
+				'&sh1106_sda_gpio=' + document.getElementById('sysI2cSda').value +
+				'&sh1106_scl_gpio=' + document.getElementById('sysI2cScl').value +
+				'&sh1106_i2c_freq_hz=' + document.getElementById('sysI2cFreq').value +
+				'&sh1106_column_offset=' + (document.getElementById('sysDisplaySize').value === '96' ? '0' : '2');
+
+			document.getElementById('systemStatus').textContent = '💾 Saving system config...';
+			document.getElementById('systemStatus').style.background = '#fff3cd';
+			document.getElementById('systemStatus').style.color = '#856404';
+
+			fetch('/system/config', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/x-www-form-urlencoded',
+				},
+				body: params
+			})
+			.then(response => response.text())
+			.then(data => {
+				document.getElementById('systemStatus').textContent = '✓ ' + data;
+				document.getElementById('systemStatus').style.background = '#d4edda';
+				document.getElementById('systemStatus').style.color = '#155724';
+			})
+			.catch(error => {
+				document.getElementById('systemStatus').textContent = '✗ Error: ' + error;
+				document.getElementById('systemStatus').style.background = '#ffebee';
+				document.getElementById('systemStatus').style.color = '#c62828';
+			});
+		}
+
+		function toggleGainHelp() {
+			var panel = document.getElementById('gainHelpPanel');
+			if (!panel) return;
+			panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none';
+		}
+		
+		// Load LED config on page load
+		window.addEventListener('load', function() {
+			loadLEDConfig();
+			loadSystemConfig();
+			loadDspConfig();
+		});
 	</script>
 </body>
 </html>

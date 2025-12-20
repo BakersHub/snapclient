@@ -83,6 +83,7 @@ static QueueHandle_t pcmChkQHdl = NULL;
 
 static TaskHandle_t playerTaskHandle = NULL;
 
+static QueueHandle_t snapcastOverrideQueueHandle = NULL;
 static QueueHandle_t snapcastSettingQueueHandle = NULL;
 
 static uint32_t i2sDmaBufCnt;
@@ -97,6 +98,8 @@ static void tg0_timer_deinit(void);
 static bool gpTimerRunning = false;
 
 static void player_task(void *pvParameters);
+
+static bool discard_input = false;
 
 extern void audio_set_mute(bool mute);
 
@@ -445,6 +448,43 @@ int init_player(i2s_std_gpio_config_t pin_config0_, i2s_port_t i2sNum_) {
   ESP_LOGI(TAG, "init player done");
 
   return 0;
+}
+
+int8_t override_player() {
+  discard_input = true;
+  if (snapcastSettingQueueHandle == NULL) {
+    return pdFAIL;
+  }
+  uint8_t override = 1;
+  const int8_t ret = xQueueOverwrite(snapcastOverrideQueueHandle, &override);
+  if (ret != pdPASS) {
+    ESP_LOGE(TAG, "player_send_snapcast_setting: couldn't override");
+  }
+  return ret;
+}
+
+int8_t deoverride_player() {
+  audio_set_mute(true);
+  my_i2s_channel_disable(tx_chan);
+  my_i2s_channel_enable(tx_chan);
+  if (snapcastSettingQueueHandle == NULL) {
+    return pdFAIL;
+  }
+  uint8_t override = 0;
+  const int8_t ret = xQueueOverwrite(snapcastOverrideQueueHandle, &override);
+  if (ret != pdPASS) {
+    ESP_LOGE(TAG, "player_send_snapcast_setting: couldn't override");
+  }
+  discard_input = false;
+  return ret;
+}
+
+esp_err_t overridden_player_write(const void *src, size_t size, size_t *bytes_written, uint32_t timeout_ms) {
+  if (!discard_input) {
+    ESP_LOGE(TAG, "Writing override without being in override mode");
+    return -1;
+  }
+  return i2s_channel_write(tx_chan, src, size, bytes_written, timeout_ms);
 }
 
 /**
@@ -1053,24 +1093,17 @@ int32_t allocate_pcm_chunk_memory(pcm_chunk_message_t **pcmChunk,
 #elif CONFIG_SPIRAM
   ret = allocate_pcm_chunk_memory_caps(*pcmChunk, bytes, 0);
 #else
-  // TODO: x should probably be dynamically calculated as a fraction of buffer
-  // size if allocation fails we try again every 1ms for max. x ms waiting for
+  // Reduced from 50 to 25 to minimize delay during memory pressure
+  // if allocation fails we try again every 1ms for max. x ms waiting for
   // chunks to finish playback
-  uint32_t x = 50;
+  uint32_t x = 25;
   for (int i = 0; i < x; i++) {
-    ret = allocate_pcm_chunk_memory_caps(*pcmChunk, bytes,
-                                         MALLOC_CAP_32BIT | MALLOC_CAP_EXEC);
+    // Try regular heap first to reduce IRAM pressure from Bluetooth
+    ret = allocate_pcm_chunk_memory_caps(*pcmChunk, bytes, MALLOC_CAP_8BIT);
     if (ret < 0) {
-      ret = allocate_pcm_chunk_memory_caps(*pcmChunk, bytes, MALLOC_CAP_8BIT);
-      //      if (ret < 0) {
-      //        //      ret = allocate_pcm_chunk_memory_caps_fragmented
-      //        //(*pcmChunk, bytes, MALLOC_CAP_32BIT | MALLOC_CAP_EXEC);
-      //        if (ret < 0) {
-      //          // allocate_pcm_chunk_memory_caps_fragmented (*pcmChunk,
-      //          bytes,
-      //          // MALLOC_CAP_8BIT);
-      //        }
-      //      }
+      // Fallback to IRAM only if regular heap fails
+      ret = allocate_pcm_chunk_memory_caps(*pcmChunk, bytes,
+                                           MALLOC_CAP_32BIT | MALLOC_CAP_EXEC);
     }
 
     if (ret < 0) {
@@ -1082,9 +1115,14 @@ int32_t allocate_pcm_chunk_memory(pcm_chunk_message_t **pcmChunk,
 #endif
 
   if (ret < 0) {
-    ESP_LOGW(TAG,
-             "couldn't get memory to insert chunk, inserting an chunk "
-             "containing just 0");
+    // During short periods of memory pressure (for example when the Bluetooth
+    // stack allocates extra buffers on AVRCP/volume events), allocating a
+    // full PCM chunk can briefly fail. In that case we fall back to inserting
+    // a silent chunk so playback timing stays correct. This is expected
+    // behavior under load, so keep the log at debug level to avoid spamming
+    // the console while still allowing diagnostics when needed.
+    ESP_LOGD(TAG,
+             "couldn't get memory to insert chunk, inserting a silent chunk");
 
     //    xSemaphoreTake(playerPcmQueueMux, portMAX_DELAY);
     //    ESP_LOGW(
@@ -1097,11 +1135,11 @@ int32_t allocate_pcm_chunk_memory(pcm_chunk_message_t **pcmChunk,
     //        MALLOC_CAP_EXEC));
     //    xSemaphoreGive(playerPcmQueueMux);
 
-    ESP_LOGW(
-        TAG, "%d, %d, %d, %d", heap_caps_get_free_size(MALLOC_CAP_8BIT),
-        heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
-        heap_caps_get_free_size(MALLOC_CAP_32BIT | MALLOC_CAP_EXEC),
-        heap_caps_get_largest_free_block(MALLOC_CAP_32BIT | MALLOC_CAP_EXEC));
+    ESP_LOGD(
+      TAG, "%d, %d, %d, %d", heap_caps_get_free_size(MALLOC_CAP_8BIT),
+      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+      heap_caps_get_free_size(MALLOC_CAP_32BIT | MALLOC_CAP_EXEC),
+      heap_caps_get_largest_free_block(MALLOC_CAP_32BIT | MALLOC_CAP_EXEC));
 
     // simulate a chunk of all samples 0,
     // player_task() will know what to do with this
@@ -1123,6 +1161,10 @@ int32_t allocate_pcm_chunk_memory(pcm_chunk_message_t **pcmChunk,
  *
  */
 int32_t insert_pcm_chunk(pcm_chunk_message_t *pcmChunk) {
+  if (discard_input) {
+    free_pcm_chunk(pcmChunk);
+    return 0;
+  }
   if (pcmChunk == NULL) {
     ESP_LOGE(TAG, "Parameter Error");
 
@@ -1193,6 +1235,8 @@ static void player_task(void *pvParameters) {
   size_t size = 0;
   uint32_t notifiedValue;
   snapcastSetting_t scSet;
+  uint8_t overridden = 0;
+  BaseType_t overridden_changed = 0;
   uint8_t scSetChgd = 0;
   uint64_t timer_val;
   int initialSync = 0;
@@ -1216,6 +1260,7 @@ static void player_task(void *pvParameters) {
   //  stats_init();
 
   // create message queue to inform task of changed settings
+  snapcastOverrideQueueHandle = xQueueCreate(1, sizeof(uint8_t));
   snapcastSettingQueueHandle = xQueueCreate(1, sizeof(uint8_t));
 
   initialSync = 0;
@@ -1227,13 +1272,27 @@ static void player_task(void *pvParameters) {
     //(MALLOC_CAP_8BIT), heap_caps_get_largest_free_block (MALLOC_CAP_8BIT));
     // ESP_LOGW (TAG, "stack free: %d", uxTaskGetStackHighWaterMark(NULL));
 
+    overridden_changed = xQueueReceive(snapcastOverrideQueueHandle, &overridden, 0);
+    if (overridden_changed == pdTRUE) {
+      ESP_LOGI(TAG, "Overridden changed!");
+    }
+
     // check if we got changed setting available, if so we need to
     // reinitialize
     ret = xQueueReceive(snapcastSettingQueueHandle, &scSetChgd, 0);
-    if (ret == pdTRUE) {
+    if (ret == pdTRUE || overridden_changed) {
       snapcastSetting_t __scSet;
 
       player_get_snapcast_settings(&__scSet);
+      if (overridden) {
+        __scSet.buf_ms = 150;                // e.g. 150 ms buffer
+        __scSet.chkInFrames = 512;           // chunk size (depends on your frame rate)
+        __scSet.codec = PCM;                 // you're inserting raw PCM
+        __scSet.sr = 44100;                  // typical BT sample rate
+        __scSet.ch = 2;                      // stereo
+        __scSet.bits = 16;                   // 16-bit
+        __scSet.cDacLat_ms = 0;              // if needed
+      }
 
       if ((__scSet.buf_ms > 0) && (__scSet.chkInFrames > 0) &&
           (__scSet.sr > 0)) {
@@ -1303,6 +1362,11 @@ static void player_task(void *pvParameters) {
         scSet = __scSet;  // store for next round
 
         gotSnapserverConfig = true;
+
+        if (overridden) {
+          audio_set_mute(false);
+          my_i2s_channel_enable(tx_chan);
+        }
       }
 
     } else if (gotSnapserverConfig == false) {
@@ -1310,6 +1374,11 @@ static void player_task(void *pvParameters) {
 
       vTaskDelay(pdMS_TO_TICKS(100));
 
+      continue;
+    }
+
+    if (overridden) {
+      vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
 
@@ -1397,6 +1466,11 @@ static void player_task(void *pvParameters) {
             } else {
               // ESP_LOGI(TAG, "got pcm chunk with size %d",
               // chnk->fragment->size);
+            }
+
+            // Check if we actually got a valid chunk
+            if (chnk == NULL) {
+              continue;  // Skip this iteration if no chunk available
             }
 
             fragment = chnk->fragment;

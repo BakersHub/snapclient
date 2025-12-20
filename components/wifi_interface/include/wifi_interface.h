@@ -29,4 +29,7 @@
 void wifi_init(void);
 esp_netif_t *get_current_netif(void);
 
+// Optional recovery SoftAP mode (AP+STA), triggered from application logic
+void wifi_start_ap_mode(void);
+
 #endif /* _WIFI_INTERFACE_H_ */

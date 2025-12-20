@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/time.h>
-#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 
@@ -12,16 +11,8 @@
 #include "dsps_biquad_gen.h"
 #include "esp_log.h"
 #include "freertos/queue.h"
-#include "nvs_flash.h"
 
 #include "dsp_processor.h"
-#include "system_config.h"
-
-#ifndef CONFIG_SNAPCAST_GAIN_BOOST
-#define SNAPCAST_GAIN_BOOST_DEFAULT 0.1f
-#else
-#define SNAPCAST_GAIN_BOOST_DEFAULT atof(CONFIG_SNAPCAST_GAIN_BOOST)
-#endif
 
 #ifdef CONFIG_USE_BIQUAD_ASM
 #define BIQUAD dsps_biquad_f32_ae32
@@ -32,8 +23,6 @@
 static const char *TAG = "dspProc";
 
 #define DSP_PROCESSOR_LEN 16
-
-#define NVS_NAMESPACE_DSP "dspcfg"
 
 static QueueHandle_t filterUpdateQHdl = NULL;
 
@@ -47,114 +36,6 @@ static bool init = false;
 
 static float *sbuffer0 = NULL;
 static float *sbufout0 = NULL;
-
-static float get_runtime_gain_boost(void) {
-  system_config_t cfg;
-  esp_err_t err = system_config_load_from_nvs(&cfg);
-  if (err == ESP_OK && cfg.snapcast_gain_boost > 0.0f &&
-      cfg.snapcast_gain_boost < 10.0f) {
-    return cfg.snapcast_gain_boost;
-  }
-
-  return SNAPCAST_GAIN_BOOST_DEFAULT;
-}
-
-static void dsp_load_filter_params_from_nvs(void) {
-  nvs_handle_t nvs;
-  esp_err_t err = nvs_open(NVS_NAMESPACE_DSP, NVS_READONLY, &nvs);
-  if (err == ESP_ERR_NVS_NOT_FOUND) {
-    ESP_LOGI(TAG, "No DSP config in NVS, using defaults");
-    return;
-  } else if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Error opening DSP NVS namespace: %s", esp_err_to_name(err));
-    return;
-  }
-
-  uint8_t flow;
-  if (nvs_get_u8(nvs, "dsp_flow", &flow) == ESP_OK && flow <= dspfEQBassTreble) {
-    filterParams.dspFlow = (dspFlows_t)flow;
-  }
-
-  size_t len = sizeof(float);
-  if (nvs_get_blob(nvs, "fc1", &filterParams.fc_1, &len) != ESP_OK) {
-    // keep default
-  }
-  len = sizeof(float);
-  if (nvs_get_blob(nvs, "g1", &filterParams.gain_1, &len) != ESP_OK) {
-    // keep default
-  }
-  len = sizeof(float);
-  if (nvs_get_blob(nvs, "fc2", &filterParams.fc_2, &len) != ESP_OK) {
-    // keep default
-  }
-  len = sizeof(float);
-  if (nvs_get_blob(nvs, "g2", &filterParams.gain_2, &len) != ESP_OK) {
-    // keep default
-  }
-  len = sizeof(float);
-  if (nvs_get_blob(nvs, "fc3", &filterParams.fc_3, &len) != ESP_OK) {
-    // keep default
-  }
-  len = sizeof(float);
-  if (nvs_get_blob(nvs, "g3", &filterParams.gain_3, &len) != ESP_OK) {
-    // keep default
-  }
-
-  nvs_close(nvs);
-
-  ESP_LOGI(TAG,
-           "Loaded DSP config from NVS: flow=%d, fc1=%.2f, g1=%.2f, fc3=%.2f, g3=%.2f",
-           (int)filterParams.dspFlow, filterParams.fc_1, filterParams.gain_1,
-           filterParams.fc_3, filterParams.gain_3);
-}
-
-static void dsp_save_filter_params_to_nvs(const filterParams_t *params) {
-  if (!params) return;
-
-  nvs_handle_t nvs;
-  esp_err_t err = nvs_open(NVS_NAMESPACE_DSP, NVS_READWRITE, &nvs);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Error opening DSP NVS namespace for write: %s",
-             esp_err_to_name(err));
-    return;
-  }
-
-  uint8_t flow = (uint8_t)params->dspFlow;
-  err = nvs_set_u8(nvs, "dsp_flow", flow);
-  if (err != ESP_OK) goto out;
-
-  err = nvs_set_blob(nvs, "fc1", &params->fc_1, sizeof(float));
-  if (err != ESP_OK) goto out;
-
-  err = nvs_set_blob(nvs, "g1", &params->gain_1, sizeof(float));
-  if (err != ESP_OK) goto out;
-
-  err = nvs_set_blob(nvs, "fc2", &params->fc_2, sizeof(float));
-  if (err != ESP_OK) goto out;
-
-  err = nvs_set_blob(nvs, "g2", &params->gain_2, sizeof(float));
-  if (err != ESP_OK) goto out;
-
-  err = nvs_set_blob(nvs, "fc3", &params->fc_3, sizeof(float));
-  if (err != ESP_OK) goto out;
-
-  err = nvs_set_blob(nvs, "g3", &params->gain_3, sizeof(float));
-  if (err != ESP_OK) goto out;
-
-  err = nvs_commit(nvs);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to commit DSP config to NVS: %s",
-             esp_err_to_name(err));
-  } else {
-    ESP_LOGI(TAG,
-             "Saved DSP config to NVS: flow=%d, fc1=%.2f, g1=%.2f, fc3=%.2f, g3=%.2f",
-             (int)params->dspFlow, params->fc_1, params->gain_1,
-             params->fc_3, params->gain_3);
-  }
-
-out:
-  nvs_close(nvs);
-}
 
 #if CONFIG_USE_DSP_PROCESSOR
 #if CONFIG_SNAPCLIENT_DSP_FLOW_STEREO
@@ -190,14 +71,13 @@ void dsp_processor_init(void) {
     return;
   }
 
+  // TODO: load this data from NVM if available
   filterParams.dspFlow = dspFlowInit;
 
   switch (filterParams.dspFlow) {
     case dspfEQBassTreble: {
       filterParams.fc_1 = 300.0;
       filterParams.gain_1 = 0.0;
-      filterParams.fc_2 = 1000.0;
-      filterParams.gain_2 = 0.0;
       filterParams.fc_3 = 4000.0;
       filterParams.gain_3 = 0.0;
 
@@ -234,9 +114,6 @@ void dsp_processor_init(void) {
 
     default: { break; }
   }
-
-  // Override defaults from NVS if available
-  dsp_load_filter_params_from_nvs();
 
   ESP_LOGI(TAG, "%s: init done", __func__);
 }
@@ -339,9 +216,7 @@ int dsp_processor_worker(char *audio, size_t chunk_size, uint32_t samplerate) {
       pdTRUE) {
     init = false;
 
-    // Store updated filter parameters in NVS so they
-    // persist across restarts.
-    dsp_save_filter_params_to_nvs(&filterParams);
+    // TODO: store filterParams in NVM
   }
 
   dspFlow = filterParams.dspFlow;
@@ -771,16 +646,8 @@ int dsp_processor_worker(char *audio, size_t chunk_size, uint32_t samplerate) {
  */
 void dsp_processor_set_volome(double volume) {
   if (volume >= 0 && volume <= 1.0) {
-    // Apply 2.5 squared volume profile to reduce loudness at low percentages
-    double processed_volume = pow(volume, 2.5);
-    
-    // Apply gain boost to match A2DP loudness levels (runtime configurable)
-    float gain_boost = get_runtime_gain_boost();
-    processed_volume *= gain_boost;
-    
-    ESP_LOGI(TAG, "Set volume to %f (processed: %f, boost: %fx)", volume,
-             processed_volume, (double)gain_boost);
-    dynamic_vol = processed_volume;
+    ESP_LOGI(TAG, "Set volume to %f", volume);
+    dynamic_vol = volume;
   }
 }
 #endif

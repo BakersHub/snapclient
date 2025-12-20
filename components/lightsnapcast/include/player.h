@@ -66,6 +66,10 @@ typedef struct snapcastSetting_s {
 int init_player(i2s_std_gpio_config_t pin_config0_, i2s_port_t i2sNum_);
 int deinit_player(void);
 
+int8_t override_player();
+int8_t deoverride_player();
+esp_err_t overridden_player_write(const void *src, size_t size, size_t *bytes_written, uint32_t timeout_ms);
+
 int32_t allocate_pcm_chunk_memory(pcm_chunk_message_t **pcmChunk, size_t bytes);
 int32_t insert_pcm_chunk(pcm_chunk_message_t *pcmChunk);
 
@@ -82,6 +86,11 @@ int32_t get_diff_to_server(int64_t *tDiff);
 int32_t server_now(int64_t *sNow, int64_t *diff2Server);
 
 int32_t pcm_chunk_queue_msg_waiting(void);
+
+// Snapcast mute/unmute functions for Bluetooth integration
+void snapcast_mute_for_bluetooth(void);
+void snapcast_unmute_after_bluetooth(void);
+
 #ifdef __cplusplus
 }
 #endif
