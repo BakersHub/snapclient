@@ -1,3 +1,8 @@
+If you rebuilt/changed the v1.1 binary and ever need to update it again, just overwrite that same file, then run: git status → git commit -am "Update v1.1 firmware" → git push.
+
+
+
+
 # Quick Start: Flashing and Installing Snapclient BT + LED + OLED
 
 These are the simplest steps to get the prebuilt firmware running on an ESP32‑WROVER and connected to your Snapserver.
@@ -14,7 +19,7 @@ Steps:
 
 1. Connect the WROVER board to your PC via USB.
 2. Open your ESPHome flasher tool and select the correct serial port.
-3. Choose the `SnapClient-BT-LED-OLED.bin` file.
+3. Choose the `SnapClient-BT-LED-OLEDv1.x.bin` file.
 4. Start the flash and wait until it finishes successfully.
 
 The board will reboot automatically after flashing.

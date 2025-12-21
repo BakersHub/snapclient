@@ -15,6 +15,7 @@
 #include <mbedtls/base64.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/stat.h>
 
 #include "dsp_processor.h"
@@ -43,6 +44,30 @@ static const char *TAG = "HTTP";
 static QueueHandle_t xQueueHttp;
 
 static esp_netif_t *netInterface = NULL;
+
+/*
+ * Decode URL-encoded form values in-place (e.g. "JBL%20adapter" -> "JBL adapter").
+ * Handles %HH hex escapes and '+' as space.
+ */
+static void url_decode_inplace(char *str) {
+  char *src = str;
+  char *dst = str;
+
+  while (*src) {
+    if (*src == '+') {
+      *dst++ = ' ';
+      src++;
+    } else if (*src == '%' && isxdigit((unsigned char)src[1]) &&
+               isxdigit((unsigned char)src[2])) {
+      char hex[3] = {src[1], src[2], '\0'};
+      *dst++ = (char)strtol(hex, NULL, 16);
+      src += 3;
+    } else {
+      *dst++ = *src++;
+    }
+  }
+  *dst = '\0';
+}
 
 /**
  *
@@ -715,6 +740,7 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
   char value[64];
 
   if (find_key_value("snapclient_name=", content, value)) {
+    url_decode_inplace(value);
     strncpy(cfg.snapclient_name, value, SYSTEM_CONFIG_MAX_NAME_LEN - 1);
     cfg.snapclient_name[SYSTEM_CONFIG_MAX_NAME_LEN - 1] = '\0';
   }
@@ -727,16 +753,19 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
   }
 
   if (find_key_value("wifi_ssid=", content, value)) {
+    url_decode_inplace(value);
     strncpy(cfg.wifi_ssid, value, SYSTEM_CONFIG_MAX_SSID_LEN - 1);
     cfg.wifi_ssid[SYSTEM_CONFIG_MAX_SSID_LEN - 1] = '\0';
   }
 
   if (find_key_value("wifi_password=", content, value)) {
+    url_decode_inplace(value);
     strncpy(cfg.wifi_password, value, SYSTEM_CONFIG_MAX_PASS_LEN - 1);
     cfg.wifi_password[SYSTEM_CONFIG_MAX_PASS_LEN - 1] = '\0';
   }
 
   if (find_key_value("snapserver_host=", content, value)) {
+    url_decode_inplace(value);
     strncpy(cfg.snapserver_host, value, SYSTEM_CONFIG_MAX_HOST_LEN - 1);
     cfg.snapserver_host[SYSTEM_CONFIG_MAX_HOST_LEN - 1] = '\0';
   }

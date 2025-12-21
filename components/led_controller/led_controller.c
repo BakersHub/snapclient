@@ -1909,7 +1909,10 @@ esp_err_t led_controller_set_effect(led_effect_t effect)
     if (effect >= LED_EFFECT_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.effect = effect;
         xSemaphoreGive(g_config_mutex);
@@ -1922,6 +1925,10 @@ esp_err_t led_controller_set_effect(led_effect_t effect)
 
 esp_err_t led_controller_set_brightness(uint8_t brightness)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.brightness = brightness;
         xSemaphoreGive(g_config_mutex);
@@ -1933,6 +1940,10 @@ esp_err_t led_controller_set_brightness(uint8_t brightness)
 
 esp_err_t led_controller_set_color(led_color_t color1, led_color_t color2)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.color1 = color1;
         g_config.color2 = color2;
@@ -1945,6 +1956,10 @@ esp_err_t led_controller_set_color(led_color_t color1, led_color_t color2)
 
 esp_err_t led_controller_set_speed(uint8_t speed)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.speed = speed;
         xSemaphoreGive(g_config_mutex);
@@ -1956,6 +1971,10 @@ esp_err_t led_controller_set_speed(uint8_t speed)
 
 esp_err_t led_controller_set_sensitivity(uint8_t sensitivity)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.sensitivity = sensitivity;
         xSemaphoreGive(g_config_mutex);
@@ -1967,6 +1986,10 @@ esp_err_t led_controller_set_sensitivity(uint8_t sensitivity)
 
 esp_err_t led_controller_set_bass_focus(uint8_t bass_focus)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.bass_focus = bass_focus;
         xSemaphoreGive(g_config_mutex);
@@ -1978,6 +2001,10 @@ esp_err_t led_controller_set_bass_focus(uint8_t bass_focus)
 
 esp_err_t led_controller_set_rainbow_speed(uint8_t speed)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.rainbow_speed = speed;
         xSemaphoreGive(g_config_mutex);
@@ -1989,6 +2016,10 @@ esp_err_t led_controller_set_rainbow_speed(uint8_t speed)
 
 esp_err_t led_controller_set_auto_rainbow(uint8_t enabled)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.auto_rainbow = enabled ? 1 : 0;
         xSemaphoreGive(g_config_mutex);
@@ -2000,6 +2031,10 @@ esp_err_t led_controller_set_auto_rainbow(uint8_t enabled)
 
 esp_err_t led_controller_set_rainbow_speed2(uint8_t speed)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.rainbow_speed2 = speed;
         xSemaphoreGive(g_config_mutex);
@@ -2011,6 +2046,10 @@ esp_err_t led_controller_set_rainbow_speed2(uint8_t speed)
 
 esp_err_t led_controller_set_auto_rainbow2(uint8_t enabled)
 {
+    if (!g_config_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_config.auto_rainbow2 = enabled ? 1 : 0;
         xSemaphoreGive(g_config_mutex);
@@ -2025,7 +2064,12 @@ esp_err_t led_controller_get_config(led_config_t *config)
     if (!config) {
         return ESP_ERR_INVALID_ARG;
     }
-    
+    if (!g_config_mutex) {
+        // Controller not initialized; signal this to caller.
+        memset(config, 0, sizeof(led_config_t));
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (xSemaphoreTake(g_config_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         memcpy(config, &g_config, sizeof(led_config_t));
         xSemaphoreGive(g_config_mutex);
