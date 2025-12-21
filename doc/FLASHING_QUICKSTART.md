@@ -21,19 +21,19 @@ The board will reboot automatically after flashing.
 
 ---
 
-## 2. Wait for the SNAPCLIENT Wi‑Fi access point
+## 2. Wait for the ESP32-SNAPCLIENT-****** Wi‑Fi access point
 
 - After the first reboot, the firmware will try to connect to Wi‑Fi using any stored credentials.
 - On a fresh flash (or when credentials are wrong/unavailable), it will **fail a few times and then start its own AP**.
 
 Within about **5–10 seconds** you should see a new open Wi‑Fi network:
 
-- SSID: **SNAPCLIENT** (or similar)
+- SSID: **ESP32-SNAPCLIENT-******** (or similar)
 
 Use any device (phone, tablet, laptop) to:
 
 1. Open the Wi‑Fi settings.
-2. Connect to the open `SNAPCLIENT` AP.
+2. Connect to the open `ESP32-SNAPCLIENT-******` AP.
 
 ---
 
@@ -41,9 +41,9 @@ Use any device (phone, tablet, laptop) to:
 
 On **Android** this is usually the easiest:
 
-1. After connecting to the `SNAPCLIENT` AP, Android will pop up a **“Sign in to network”** / **captive portal** window.
+1. After connecting to the `ESP32-SNAPCLIENT-******` AP, Android will pop up a **“Sign in to network”** / **captive portal** window.
 2. Allow it to connect; if the captive portal opens, you are already on the setup page.
-3. If not, tap the **gear icon** next to the `SNAPCLIENT` network in Wi‑Fi settings.
+3. If not, tap the **gear icon** next to the `ESP32-SNAPCLIENT-******` network in Wi‑Fi settings.
 4. Tap **Manage router** (or similar) — this opens the device config page.
 
 On any device, you can also open a browser and go directly to:
