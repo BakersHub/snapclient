@@ -10,7 +10,7 @@ menu "LED Controller Configuration"
     config LED_GPIO_PIN
         int "LED Data GPIO Pin"
         depends on ENABLE_LED_CONTROLLER
-        default 5
+        default 23
         help
             GPIO pin connected to the LED strip data line.
             Common pins: GPIO5, GPIO18, GPIO19, GPIO23
@@ -36,12 +36,11 @@ menu "LED Controller Configuration"
     config LED_DEFAULT_EFFECT
         int "Default Effect"
         depends on ENABLE_LED_CONTROLLER
-        default 1
-        range 0 10
+        default 26
+        range 0 29
         help
             Default LED effect on startup.
-            0=Off, 1=VU Meter, 2=Spectrum, 3=Pulse, 4=Wave, 5=Energy Bar,
-            6=Rainbow Pulse, 7=Beat Flash, 8=Bass Pulse, 9=Stereo VU, 10=Solid
+            Valid values are 0..29, matching the LED_EFFECT_* enum.
 
     config LED_DEFAULT_SENSITIVITY
         int "Default Audio Sensitivity (0-255)"
