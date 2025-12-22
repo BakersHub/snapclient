@@ -30,6 +30,12 @@ typedef struct {
     int   sh1106_scl_gpio;
     int   sh1106_i2c_freq_hz;
     int   sh1106_column_offset;   // 0 for 0.96" panels, 2 for 1.28" SH1106
+    // Runtime-overridable audio pins (override Kconfig defaults when set)
+    int   i2s_mclk_pin;
+    int   i2s_bck_pin;
+    int   i2s_lrck_pin;
+    int   i2s_dataout_pin;
+    int   pcm5102a_mute_pin;
 } system_config_t;
 
 void system_config_set_defaults(system_config_t *config);

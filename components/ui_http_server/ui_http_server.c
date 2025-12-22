@@ -676,7 +676,7 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
   system_config_set_defaults(&cfg);
   system_config_load_from_nvs(&cfg);
 
-  char json[1024];
+  char json[1280];
   snprintf(json, sizeof(json),
            "{\"snapclient_name\":\"%s\",\"snapcast_gain_boost\":%.3f,"
            "\"wifi_ssid\":\"%s\",\"wifi_password\":\"%s\"," 
@@ -684,7 +684,9 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            "\"volume_buttons_enabled\":%s,\"volume_up_pin\":%d,\"volume_down_pin\":%d,"
            "\"effect_button_enabled\":%s,\"effect_button_pin\":%d,"
            "\"sh1106_enabled\":%s,\"sh1106_sda_gpio\":%d,\"sh1106_scl_gpio\":%d,\"sh1106_i2c_freq_hz\":%d,"
-           "\"sh1106_column_offset\":%d}",
+           "\"sh1106_column_offset\":%d,"
+           "\"i2s_mclk_pin\":%d,\"i2s_bck_pin\":%d,\"i2s_lrck_pin\":%d,\"i2s_dataout_pin\":%d,"
+           "\"pcm5102a_mute_pin\":%d}",
            cfg.snapclient_name,
            (double)cfg.snapcast_gain_boost,
            cfg.wifi_ssid,
@@ -700,7 +702,12 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            cfg.sh1106_sda_gpio,
            cfg.sh1106_scl_gpio,
            cfg.sh1106_i2c_freq_hz,
-           cfg.sh1106_column_offset);
+           cfg.sh1106_column_offset,
+           cfg.i2s_mclk_pin,
+           cfg.i2s_bck_pin,
+           cfg.i2s_lrck_pin,
+           cfg.i2s_dataout_pin,
+           cfg.pcm5102a_mute_pin);
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_sendstr(req, json);
@@ -820,6 +827,41 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
     int col = atoi(value);
     if (col >= 0 && col <= 127) {
       cfg.sh1106_column_offset = col;
+    }
+  }
+
+  if (find_key_value("i2s_mclk_pin=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= -1 && pin <= 39) {
+      cfg.i2s_mclk_pin = pin;
+    }
+  }
+
+  if (find_key_value("i2s_bck_pin=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= -1 && pin <= 39) {
+      cfg.i2s_bck_pin = pin;
+    }
+  }
+
+  if (find_key_value("i2s_lrck_pin=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= -1 && pin <= 39) {
+      cfg.i2s_lrck_pin = pin;
+    }
+  }
+
+  if (find_key_value("i2s_dataout_pin=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= -1 && pin <= 39) {
+      cfg.i2s_dataout_pin = pin;
+    }
+  }
+
+  if (find_key_value("pcm5102a_mute_pin=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= -1 && pin <= 39) {
+      cfg.pcm5102a_mute_pin = pin;
     }
   }
 

@@ -31,6 +31,7 @@
 #include "board.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "system_config.h"
 
 #if SOC_I2S_NUM > 1
 #define I2S_NUM_MAX I2S_NUM_1 + 1
@@ -55,11 +56,35 @@ esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config) {
 esp_err_t get_i2s_pins(i2s_port_t port, board_i2s_pin_t *i2s_config) {
   AUDIO_NULL_CHECK(TAG, i2s_config, return ESP_FAIL);
   if (port == I2S_NUM_0) {
-    i2s_config->mck_io_num = CONFIG_MASTER_I2S_MCLK_PIN;
-    i2s_config->bck_io_num = CONFIG_MASTER_I2S_BCK_PIN;
-    i2s_config->ws_io_num = CONFIG_MASTER_I2S_LRCK_PIN;
-    i2s_config->data_out_num = CONFIG_MASTER_I2S_DATAOUT_PIN;
-    i2s_config->data_in_num = -1;
+    // Start from compile-time defaults
+    int mclk = CONFIG_MASTER_I2S_MCLK_PIN;
+    int bck  = CONFIG_MASTER_I2S_BCK_PIN;
+    int lrck = CONFIG_MASTER_I2S_LRCK_PIN;
+    int data = CONFIG_MASTER_I2S_DATAOUT_PIN;
+
+    // Allow overrides from system_config (NVS / web UI)
+    system_config_t cfg;
+    system_config_set_defaults(&cfg);
+    if (system_config_load_from_nvs(&cfg) == ESP_OK) {
+      if (cfg.i2s_mclk_pin >= -1 && cfg.i2s_mclk_pin <= 39) {
+        mclk = cfg.i2s_mclk_pin;
+      }
+      if (cfg.i2s_bck_pin >= -1 && cfg.i2s_bck_pin <= 39) {
+        bck = cfg.i2s_bck_pin;
+      }
+      if (cfg.i2s_lrck_pin >= -1 && cfg.i2s_lrck_pin <= 39) {
+        lrck = cfg.i2s_lrck_pin;
+      }
+      if (cfg.i2s_dataout_pin >= -1 && cfg.i2s_dataout_pin <= 39) {
+        data = cfg.i2s_dataout_pin;
+      }
+    }
+
+    i2s_config->mck_io_num   = mclk;
+    i2s_config->bck_io_num   = bck;
+    i2s_config->ws_io_num    = lrck;
+    i2s_config->data_out_num = data;
+    i2s_config->data_in_num  = -1;
   } else {
     memset(i2s_config, -1, sizeof(board_i2s_pin_t));
     ESP_LOGE(TAG, "i2s port %d is not supported", port);

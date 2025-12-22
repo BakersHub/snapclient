@@ -107,7 +107,7 @@
 	<div class="headline_container">
 		<h1><span id="deviceNameHeading">Snapclient</span> Setup & LED Control</h1>
 		<p style="margin: 6px 0 0 0; font-size: 0.75rem; color: #cccccc;">
-			Made thanks to @BakersHub, @Aximut, @luar123, @CarlosDerSeher & many other contributors to Snapcast.
+			Made thanks to @BakersHub, @Aximut, @luar123, @CarlosDerSeher & many other contributors to Snapcast
 		</p>
 	</div>
 
@@ -471,6 +471,37 @@
 			</span>
 		</div>
 
+		<div class="led-control-group">
+			<label for="sysI2sMclk">I2S MCLK GPIO:</label>
+			<input type="number" id="sysI2sMclk" min="-1" max="39" value="0">
+			<span style="display:block; font-size: 0.8rem; color: #888; margin-top: 4px;">
+				Use -1 to disable MCLK if your DAC does not need it.
+			</span>
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysI2sBck">I2S BCK GPIO:</label>
+			<input type="number" id="sysI2sBck" min="0" max="39" value="33">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysI2sLrck">I2S LRCK GPIO:</label>
+			<input type="number" id="sysI2sLrck" min="0" max="39" value="32">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysI2sData">I2S DATAOUT GPIO:</label>
+			<input type="number" id="sysI2sData" min="0" max="39" value="25">
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysPcmMute">PCM5102A MUTE GPIO:</label>
+			<input type="number" id="sysPcmMute" min="-1" max="39" value="26">
+			<span style="display:block; font-size: 0.8rem; color: #888; margin-top: 4px;">
+				Set to -1 if your DAC mute pin is not connected.
+			</span>
+		</div>
+
 		<button onclick="saveSystemConfig()" style="margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
 			💾 Save System Config & Restart
 		</button>
@@ -811,6 +842,21 @@
 							document.getElementById('sysDisplaySize').value = '128';
 						}
 					}
+					if (typeof data.i2s_mclk_pin !== 'undefined') {
+						document.getElementById('sysI2sMclk').value = data.i2s_mclk_pin;
+					}
+					if (typeof data.i2s_bck_pin !== 'undefined') {
+						document.getElementById('sysI2sBck').value = data.i2s_bck_pin;
+					}
+					if (typeof data.i2s_lrck_pin !== 'undefined') {
+						document.getElementById('sysI2sLrck').value = data.i2s_lrck_pin;
+					}
+					if (typeof data.i2s_dataout_pin !== 'undefined') {
+						document.getElementById('sysI2sData').value = data.i2s_dataout_pin;
+					}
+					if (typeof data.pcm5102a_mute_pin !== 'undefined') {
+						document.getElementById('sysPcmMute').value = data.pcm5102a_mute_pin;
+					}
 					document.getElementById('systemStatus').textContent = 'System config loaded';
 				})
 				.catch(error => {
@@ -835,7 +881,12 @@
 				'&sh1106_sda_gpio=' + document.getElementById('sysI2cSda').value +
 				'&sh1106_scl_gpio=' + document.getElementById('sysI2cScl').value +
 				'&sh1106_i2c_freq_hz=' + document.getElementById('sysI2cFreq').value +
-				'&sh1106_column_offset=' + (document.getElementById('sysDisplaySize').value === '96' ? '0' : '2');
+				'&sh1106_column_offset=' + (document.getElementById('sysDisplaySize').value === '96' ? '0' : '2') +
+				'&i2s_mclk_pin=' + document.getElementById('sysI2sMclk').value +
+				'&i2s_bck_pin=' + document.getElementById('sysI2sBck').value +
+				'&i2s_lrck_pin=' + document.getElementById('sysI2sLrck').value +
+				'&i2s_dataout_pin=' + document.getElementById('sysI2sData').value +
+				'&pcm5102a_mute_pin=' + document.getElementById('sysPcmMute').value;
 
 			document.getElementById('systemStatus').textContent = '💾 Saving system config...';
 			document.getElementById('systemStatus').style.background = '#fff3cd';

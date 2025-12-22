@@ -113,6 +113,38 @@ void system_config_set_defaults(system_config_t *config)
 #else
     config->sh1106_column_offset = 2;
 #endif
+
+    // I2S master interface pins (override-able via web UI + NVS)
+#ifdef CONFIG_MASTER_I2S_MCLK_PIN
+    config->i2s_mclk_pin = CONFIG_MASTER_I2S_MCLK_PIN;
+#else
+    config->i2s_mclk_pin = 0;
+#endif
+
+#ifdef CONFIG_MASTER_I2S_BCK_PIN
+    config->i2s_bck_pin = CONFIG_MASTER_I2S_BCK_PIN;
+#else
+    config->i2s_bck_pin = 33;
+#endif
+
+#ifdef CONFIG_MASTER_I2S_LRCK_PIN
+    config->i2s_lrck_pin = CONFIG_MASTER_I2S_LRCK_PIN;
+#else
+    config->i2s_lrck_pin = 32;
+#endif
+
+#ifdef CONFIG_MASTER_I2S_DATAOUT_PIN
+    config->i2s_dataout_pin = CONFIG_MASTER_I2S_DATAOUT_PIN;
+#else
+    config->i2s_dataout_pin = 25;
+#endif
+
+    // TI PCM5102A mute pin (XMT), -1 disables mute control
+#ifdef CONFIG_PCM5102A_MUTE_PIN
+    config->pcm5102a_mute_pin = CONFIG_PCM5102A_MUTE_PIN;
+#else
+    config->pcm5102a_mute_pin = 26;
+#endif
 }
 
 esp_err_t system_config_load_from_nvs(system_config_t *config)
@@ -206,6 +238,27 @@ esp_err_t system_config_load_from_nvs(system_config_t *config)
         config->sh1106_column_offset = (int)i32;
     }
 
+    // Optional overrides for audio pins; basic range check  -1..39
+    if (nvs_get_i32(nvs_handle, "i2s_mclk", &i32) == ESP_OK && i32 >= -1 && i32 <= 39) {
+        config->i2s_mclk_pin = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "i2s_bck", &i32) == ESP_OK && i32 >= -1 && i32 <= 39) {
+        config->i2s_bck_pin = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "i2s_lrck", &i32) == ESP_OK && i32 >= -1 && i32 <= 39) {
+        config->i2s_lrck_pin = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "i2s_data", &i32) == ESP_OK && i32 >= -1 && i32 <= 39) {
+        config->i2s_dataout_pin = (int)i32;
+    }
+
+    if (nvs_get_i32(nvs_handle, "pcm_mute", &i32) == ESP_OK && i32 >= -1 && i32 <= 39) {
+        config->pcm5102a_mute_pin = (int)i32;
+    }
+
     nvs_close(nvs_handle);
     ESP_LOGI(TAG, "Loaded system config from NVS: name='%s', vol_up=%d, vol_down=%d, gain=%.2f, buttons=%s",
              config->snapclient_name,
@@ -275,6 +328,22 @@ esp_err_t system_config_save_to_nvs(const system_config_t *config)
     if (err != ESP_OK) goto out;
 
     err = nvs_set_i32(nvs_handle, "sh1106_col", (int32_t)config->sh1106_column_offset);
+    if (err != ESP_OK) goto out;
+
+    // Persist audio pin overrides
+    err = nvs_set_i32(nvs_handle, "i2s_mclk", (int32_t)config->i2s_mclk_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "i2s_bck", (int32_t)config->i2s_bck_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "i2s_lrck", (int32_t)config->i2s_lrck_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "i2s_data", (int32_t)config->i2s_dataout_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "pcm_mute", (int32_t)config->pcm5102a_mute_pin);
     if (err != ESP_OK) goto out;
 
     err = nvs_commit(nvs_handle);
