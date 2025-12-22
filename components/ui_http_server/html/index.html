@@ -101,6 +101,15 @@
 			color: #2e7d32;
 			font-size: 0.9rem;
 		}
+		.section-separator {
+			margin: 18px 0 6px;
+			padding-top: 8px;
+			border-top: 1px solid #444;
+			text-align: left;
+			font-size: 0.9rem;
+			color: #cccccc;
+			font-weight: bold;
+		}
 	</style>
 </head>
 <body>
@@ -369,6 +378,8 @@
 		<h2>⚙️ System & Device Configuration</h2>
 		<p style="font-size: 0.9rem; color: #888;">These settings control WiFi, Snapserver, device name, Snapcast gain, hardware volume buttons and SH1106 OLED display</p>
 
+		<div class="section-separator">WiFi, Snapserver & Device Name</div>
+
 		<div class="led-control-group">
 			<label for="sysWifiSsid">WiFi SSID:</label>
 			<input type="text" id="sysWifiSsid" maxlength="31" placeholder="myssid">
@@ -393,6 +404,8 @@
 			<label for="sysName">Device / Snapclient Name:</label>
 			<input type="text" id="sysName" maxlength="31" placeholder="Snapclient">
 		</div>
+
+		<div class="section-separator">Volume Buttons & Snapcast Gain</div>
 
 		<div class="led-control-group">
 			<label for="sysGainBoost">Snapcast Gain Boost:</label>
@@ -430,6 +443,8 @@
 			<input type="number" id="sysVolDownPin" min="0" max="39" value="14">
 		</div>
 
+		<div class="section-separator">LED ON/OFF Effect Button</div>
+
 		<div class="led-control-group">
 			<label for="sysEffectButton">Enable LED ON/OFF Effect Button:</label>
 			<input type="checkbox" id="sysEffectButton">
@@ -439,6 +454,8 @@
 			<label for="sysEffectButtonPin">LED ON/OFF Effect Button GPIO:</label>
 			<input type="number" id="sysEffectButtonPin" min="0" max="39" value="33">
 		</div>
+
+		<div class="section-separator">OLED Display (SH1106 / SSD1306)</div>
 
 		<div class="led-control-group">
 			<label for="sysDisplayEnable">Enable OLED Display:</label>
@@ -470,6 +487,8 @@
 				Horizontal column offset for the panel. Classic SH1106 1.28&quot; modules typically use 2, while many 0.96&quot; SSD1306 128x64 modules use 0.
 			</span>
 		</div>
+
+		<div class="section-separator">PCM5102A DAC & I2S Pins</div>
 
 		<div class="led-control-group">
 			<label for="sysI2sMclk">I2S MCLK GPIO:</label>
