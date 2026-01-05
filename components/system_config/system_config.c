@@ -52,7 +52,7 @@ void system_config_set_defaults(system_config_t *config)
         config->snapcast_gain_boost = 0.1f;
     }
 #else
-    config->snapcast_gain_boost = 0.1f;
+    config->snapcast_gain_boost = 1.0f;
 #endif
 
 #ifdef CONFIG_WIFI_SSID
