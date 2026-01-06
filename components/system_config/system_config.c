@@ -49,7 +49,7 @@ void system_config_set_defaults(system_config_t *config)
 #ifdef CONFIG_SNAPCAST_GAIN_BOOST
     config->snapcast_gain_boost = (float)atof(CONFIG_SNAPCAST_GAIN_BOOST);
     if (config->snapcast_gain_boost <= 0.0f) {
-        config->snapcast_gain_boost = 0.1f;
+        config->snapcast_gain_boost = 1.0f;
     }
 #else
     config->snapcast_gain_boost = 1.0f;
@@ -145,6 +145,8 @@ void system_config_set_defaults(system_config_t *config)
 #else
     config->pcm5102a_mute_pin = 26;
 #endif
+
+    config->ap_mode_button_gpio = 19;
 }
 
 esp_err_t system_config_load_from_nvs(system_config_t *config)
@@ -259,6 +261,10 @@ esp_err_t system_config_load_from_nvs(system_config_t *config)
         config->pcm5102a_mute_pin = (int)i32;
     }
 
+    if (nvs_get_i32(nvs_handle, "ap_btn_gpio", &i32) == ESP_OK && i32 >= 0 && i32 <= 48) {
+        config->ap_mode_button_gpio = (int)i32;
+    }
+
     nvs_close(nvs_handle);
     ESP_LOGI(TAG, "Loaded system config from NVS: name='%s', vol_up=%d, vol_down=%d, gain=%.2f, buttons=%s",
              config->snapclient_name,
@@ -344,6 +350,9 @@ esp_err_t system_config_save_to_nvs(const system_config_t *config)
     if (err != ESP_OK) goto out;
 
     err = nvs_set_i32(nvs_handle, "pcm_mute", (int32_t)config->pcm5102a_mute_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_i32(nvs_handle, "ap_btn_gpio", (int32_t)config->ap_mode_button_gpio);
     if (err != ESP_OK) goto out;
 
     err = nvs_commit(nvs_handle);

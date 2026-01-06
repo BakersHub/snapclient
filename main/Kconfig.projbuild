@@ -67,7 +67,7 @@ menu "Snapclient Configuration"
 
 		config SNAPCAST_GAIN_BOOST
 			string "Volume Gain Boost Multiplier"
-			default "0.1"
+			default "1.0"
 			help
 				Gain boost multiplier applied to volume to match A2DP loudness levels.
 				Default is 1.0 (0% boost). Use values like 0.5, 1.0, 1.5, etc.

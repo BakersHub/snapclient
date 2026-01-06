@@ -521,6 +521,16 @@
 			</span>
 		</div>
 
+		<div class="section-separator">Recovery AP Button</div>
+
+		<div class="led-control-group">
+			<label for="sysApBtnGpio">AP Mode Button GPIO:</label>
+			<input type="number" id="sysApBtnGpio" min="0" max="48">
+			<span style="display:block; font-size: 0.8rem; color: #888; margin-top: 4px;">
+				GPIO used for triggering recovery AP mode (active-high).
+			</span>
+		</div>
+
 		<button onclick="saveSystemConfig()" style="margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
 			💾 Save System Config & Restart
 		</button>
@@ -876,6 +886,9 @@
 					if (typeof data.pcm5102a_mute_pin !== 'undefined') {
 						document.getElementById('sysPcmMute').value = data.pcm5102a_mute_pin;
 					}
+					if (typeof data.ap_mode_button_gpio !== 'undefined') {
+						document.getElementById('sysApBtnGpio').value = data.ap_mode_button_gpio;
+					}
 					document.getElementById('systemStatus').textContent = 'System config loaded';
 				})
 				.catch(error => {
@@ -905,7 +918,8 @@
 				'&i2s_bck_pin=' + document.getElementById('sysI2sBck').value +
 				'&i2s_lrck_pin=' + document.getElementById('sysI2sLrck').value +
 				'&i2s_dataout_pin=' + document.getElementById('sysI2sData').value +
-				'&pcm5102a_mute_pin=' + document.getElementById('sysPcmMute').value;
+				'&pcm5102a_mute_pin=' + document.getElementById('sysPcmMute').value +
+				'&ap_mode_button_gpio=' + document.getElementById('sysApBtnGpio').value;
 
 			document.getElementById('systemStatus').textContent = '💾 Saving system config...';
 			document.getElementById('systemStatus').style.background = '#fff3cd';

@@ -36,6 +36,7 @@ typedef struct {
     int   i2s_lrck_pin;
     int   i2s_dataout_pin;
     int   pcm5102a_mute_pin;
+    int   ap_mode_button_gpio;
 } system_config_t;
 
 void system_config_set_defaults(system_config_t *config);

@@ -93,9 +93,9 @@ static system_config_t g_system_config;
 #define VOLUME_BUTTON_DEBOUNCE_MS 100  // Volume button debounce - reduced for instant feel
 #define VOLUME_REPEAT_RATE_MS 500      // Repeat rate when holding button
 
-// Recovery AP trigger button (GPIO19, active-high)
-// Wire a momentary button so that pressing it drives GPIO19 HIGH.
-#define AP_MODE_BUTTON_GPIO GPIO_NUM_19
+// Recovery AP trigger button (configurable, active-high)
+// Wire a momentary button so that pressing it drives the GPIO HIGH.
+#define AP_MODE_BUTTON_GPIO ((gpio_num_t)g_system_config.ap_mode_button_gpio)
 #define AP_MODE_HOLD_MS     3000
 
 static bool isCachedChunk = false;
@@ -3498,7 +3498,9 @@ static void ap_mode_button_task(void *pvParameters) {
   const TickType_t poll = pdMS_TO_TICKS(50);
   uint32_t pressed_ms = 0;
   bool ap_started_logged = false;
-  ESP_LOGI("AP_BUTTON", "AP button configured on GPIO19 (active-high)");
+
+  ESP_LOGI("AP_BUTTON", "AP button configured on GPIO%d (active-high)", AP_MODE_BUTTON_GPIO);
+
 
   while (1) {
     int level = gpio_get_level(AP_MODE_BUTTON_GPIO);

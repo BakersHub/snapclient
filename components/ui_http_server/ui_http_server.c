@@ -683,6 +683,7 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            "\"snapserver_host\":\"%s\",\"snapserver_port\":%d,"
            "\"volume_buttons_enabled\":%s,\"volume_up_pin\":%d,\"volume_down_pin\":%d,"
            "\"effect_button_enabled\":%s,\"effect_button_pin\":%d,"
+           "\"ap_mode_button_gpio\":%d,"
            "\"sh1106_enabled\":%s,\"sh1106_sda_gpio\":%d,\"sh1106_scl_gpio\":%d,\"sh1106_i2c_freq_hz\":%d,"
            "\"sh1106_column_offset\":%d,"
            "\"i2s_mclk_pin\":%d,\"i2s_bck_pin\":%d,\"i2s_lrck_pin\":%d,\"i2s_dataout_pin\":%d,"
@@ -698,6 +699,7 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            cfg.volume_down_pin,
            cfg.effect_button_enabled ? "true" : "false",
            cfg.effect_button_pin,
+           cfg.ap_mode_button_gpio,               
            cfg.sh1106_enabled ? "true" : "false",
            cfg.sh1106_sda_gpio,
            cfg.sh1106_scl_gpio,
@@ -862,6 +864,13 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
     int pin = atoi(value);
     if (pin >= -1 && pin <= 39) {
       cfg.pcm5102a_mute_pin = pin;
+    }
+  }
+
+  if (find_key_value("ap_mode_button_gpio=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= 0 && pin <= 48) {
+      cfg.ap_mode_button_gpio = pin;
     }
   }
 
