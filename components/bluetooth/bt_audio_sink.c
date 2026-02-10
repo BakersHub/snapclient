@@ -14,7 +14,7 @@
 #include "esp_a2dp_api.h"
 #include "esp_avrc_api.h"
 #include "freertos/semphr.h"
-
+#include <math.h> 
 #include "player.h"
 #include "bt_audio_task.h"
 #include "system_config.h"
@@ -555,14 +555,16 @@ static void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len) {
 
     // Apply volume scaling to audio data
     if (len >= 2 && s_volume < 127) {
-        // Apply volume scaling (s_volume is 0-127, convert to 0.0-1.0 scale)
-        float volume_scale = (float)s_volume / 127.0f;
         int16_t *samples = (int16_t *)data;
         int16_t *output_samples = (int16_t *)pcmChunk->fragment->payload;
         uint32_t sample_count = len / 2;
-        
+
+        // Non-linear volume curve using powf()
+        float norm = (float)s_volume / 127.0f;
+        float processed_volume = powf(norm, 2.5f);
+
         for (uint32_t i = 0; i < sample_count; i++) {
-            int32_t scaled_sample = (int32_t)(samples[i] * volume_scale);
+            int32_t scaled_sample = (int32_t)(samples[i] * processed_volume);
             // Clamp to prevent overflow
             if (scaled_sample > 32767) scaled_sample = 32767;
             if (scaled_sample < -32768) scaled_sample = -32768;
