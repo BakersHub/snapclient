@@ -18,6 +18,8 @@
 #include "player.h"
 #include "bt_audio_task.h"
 #include "system_config.h"
+#include "esp_wifi.h"
+#include "esp_coexist.h"
 
 #ifdef CONFIG_ENABLE_LED_CONTROLLER
 #include "led_controller.h"
@@ -234,6 +236,11 @@ static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 override_player();
                 // Mute Snapcast when Bluetooth audio starts
                 snapcast_mute_for_bluetooth();
+                // 🔽 Give Bluetooth priority over WiFi
+                esp_coex_preference_set(ESP_COEX_PREFER_BT);
+                // 🔽 Reduce WiFi RF interference
+                esp_wifi_set_max_tx_power(40);  // try 40–52 first
+                esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 #if CONFIG_ENABLE_SH1106_DISPLAY
                 // Initialize with placeholder metadata
                 strncpy(bt_current_title, "Loading...", sizeof(bt_current_title) - 1);
@@ -254,6 +261,11 @@ static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 deoverride_player();
                 // Unmute Snapcast when Bluetooth audio stops
                 snapcast_unmute_after_bluetooth();
+                // 🔽 Restore WiFi priority
+                esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
+                // 🔽 Restore WiFi power
+                esp_wifi_set_max_tx_power(78);
+                esp_wifi_set_ps(WIFI_PS_NONE);
 #if CONFIG_ENABLE_SH1106_DISPLAY
                 display_set_bt_audio_playing(false);
                 // Clear Bluetooth metadata
