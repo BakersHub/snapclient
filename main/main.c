@@ -545,19 +545,18 @@ static int pre_bluetooth_volume = -1;
  * Mute Snapcast when Bluetooth audio starts playing
  */
 void snapcast_mute_for_bluetooth(void) {
-    // Store current volume if not already muted
-    if (pre_bluetooth_volume == -1 && scSet.volume > 0) {
-        pre_bluetooth_volume = scSet.volume;
+    if (pre_bluetooth_volume == -1) {
+        pre_bluetooth_volume = scSet.volume; // store even 0
         ESP_LOGI("SC", "Storing Snapcast volume (%d%%) and muting for Bluetooth", pre_bluetooth_volume);
     }
-    
-    // Set volume to 0 to mute Snapcast
-    if (scSet.volume > 0) {
-        scSet.volume = 0;
+
+    if (!scSet.muted) {
         scSet.muted = true;
+        scSet.volume = 0;
         audio_set_volume(0);
       // Inform Snapserver so it stops sending audio and frees WiFi
-      send_volume_update_to_server(0);
+        send_volume_update_to_server(0);
+
 #if CONFIG_ENABLE_SH1106_DISPLAY
         display_set_snapcast_mute(true);
 #endif
@@ -572,18 +571,23 @@ void snapcast_unmute_after_bluetooth(void) {
     // Restore previous volume if we have one stored
     if (pre_bluetooth_volume > 0) {
         ESP_LOGI("SC", "Restoring Snapcast volume to %d%% after Bluetooth", pre_bluetooth_volume);
-        scSet.volume = pre_bluetooth_volume;
+
         scSet.muted = false;
+
+        // kick Snapserver to restart stream
+        send_volume_update_to_server(0);
+        vTaskDelay(pdMS_TO_TICKS(50));
+
+        scSet.volume = pre_bluetooth_volume;
         audio_set_volume(pre_bluetooth_volume);
         // Restore volume on Snapserver so stream resumes at the same level
         send_volume_update_to_server(pre_bluetooth_volume);
+
 #if CONFIG_ENABLE_SH1106_DISPLAY
         display_set_snapcast_mute(false);
 #endif
-        pre_bluetooth_volume = -1; // Reset stored volume
-        ESP_LOGI("SC", "Snapcast unmuted and restored to %"PRIu32"%%", scSet.volume);
-    } else {
-        ESP_LOGW("SC", "No previous Snapcast volume to restore");
+
+        pre_bluetooth_volume = -1;
     }
 }
 

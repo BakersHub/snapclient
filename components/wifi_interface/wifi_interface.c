@@ -99,6 +99,9 @@ void wifi_init(void) {
   esp_wifi_set_protocol(
       WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
 
+  // Disable Wi-Fi power save mode for lowest latency
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
   // esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
   //   esp_wifi_set_ps(WIFI_PS_NONE);
 
