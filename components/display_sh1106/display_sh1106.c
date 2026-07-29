@@ -1065,8 +1065,7 @@ void display_set_bt_audio_playing(bool playing) {
     if (!display_initialized) return;
     
     if (xSemaphoreTake(display_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        current_audio.is_playing = playing;
-        current_audio.is_connected = playing; // When BT audio plays, consider it connected
+        current_audio.bt_audio_playing = playing;
         xSemaphoreGive(display_mutex);
     }
 }
@@ -1118,7 +1117,7 @@ static void display_task(void* pvParameters) {
         
         if (xSemaphoreTake(display_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
             // Bluetooth audio playing: Show source device name + song info + EQ
-            if (current_bt.bt_connected && current_audio.is_connected) {
+            if (current_bt.bt_connected && current_audio.bt_audio_playing) {
                 // Device name scrolls between left edge and clock area
                 const int max_bt_name_chars = 10; // roughly up to clock_x in 6px font
                 const char *name = strlen(bt_connected_device_name) > 0

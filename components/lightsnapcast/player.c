@@ -327,8 +327,8 @@ static int destroy_pcm_queue(QueueHandle_t *queueHandle) {
   pcm_chunk_message_t *chnk = NULL;
 
   if (*queueHandle == NULL) {
-    ESP_LOGW(TAG, "no pcm chunk queue created?");
-    ret = pdFAIL;
+    // Queue not created - this is normal when snapcast is disabled
+    ret = pdPASS;
   } else {
     // free all allocated memory
     while (uxQueueMessagesWaiting(*queueHandle)) {

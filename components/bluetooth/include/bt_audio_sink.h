@@ -19,6 +19,9 @@ void bt_audio_volume_down();
 // Get current Bluetooth volume (0-100%)
 int bt_audio_get_volume_percent();
 
+// Check if WiFi is intentionally stopped for Bluetooth-only mode
+bool bt_audio_is_wifi_intentionally_stopped();
+
 #ifdef __cplusplus
 }
 #endif

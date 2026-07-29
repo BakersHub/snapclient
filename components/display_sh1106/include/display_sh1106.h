@@ -79,7 +79,8 @@ typedef struct {
     uint8_t volume_level;      // 0-100
     uint8_t peak_level;        // 0-100
     bool is_playing;
-    bool is_connected;
+    bool is_connected;         // Snapcast connection status
+    bool bt_audio_playing;     // Bluetooth audio playing status
     bool is_resyncing;         // True when in RESYNCING HARD state
     uint32_t last_update_time;
 } audio_viz_t;

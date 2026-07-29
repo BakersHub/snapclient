@@ -11,6 +11,7 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=C:\\Espressif\\tools\\xtensa-esp32-elf\\esp-12.2.0_20230208\\xtensa-esp32-elf\\bin\\xtensa-esp32-elf-gcc.exe",
-    "--compile-commands-dir=c:\\Users\\BAKER\\Desktop\\snapclient1.8\\build"
-  ]
+    "--compile-commands-dir=c:\\Users\\BAKER\\Desktop\\Snapclient-BT-LED-OLED-repo\\ESP32WROVER\\snap-bt-led-oled\\build"
+  ],
+  "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.1.6/"
 }

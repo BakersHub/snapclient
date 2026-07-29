@@ -147,6 +147,32 @@ void system_config_set_defaults(system_config_t *config)
 #endif
 
     config->ap_mode_button_gpio = 19;
+    config->stop_wifi_during_bt = true;
+
+    // Audio source toggles
+    config->snapcast_audio_enabled = true;
+    config->bluetooth_audio_enabled = true;
+
+    // Dynamic bass mapping defaults
+    config->bass_mapping_enabled = false;
+    config->bass_mapping_low_gain = 0.0f;
+    config->bass_mapping_high_gain = 0.0f;
+    strncpy(config->bass_mapping_curve, "linear", sizeof(config->bass_mapping_curve) - 1);
+    config->bass_mapping_curve[sizeof(config->bass_mapping_curve) - 1] = '\0';
+
+    // Dynamic mids mapping defaults
+    config->mids_mapping_enabled = false;
+    config->mids_mapping_low_gain = 0.0f;
+    config->mids_mapping_high_gain = 0.0f;
+    strncpy(config->mids_mapping_curve, "linear", sizeof(config->mids_mapping_curve) - 1);
+    config->mids_mapping_curve[sizeof(config->mids_mapping_curve) - 1] = '\0';
+
+    // Dynamic treble mapping defaults
+    config->treble_mapping_enabled = false;
+    config->treble_mapping_low_gain = 0.0f;
+    config->treble_mapping_high_gain = 0.0f;
+    strncpy(config->treble_mapping_curve, "linear", sizeof(config->treble_mapping_curve) - 1);
+    config->treble_mapping_curve[sizeof(config->treble_mapping_curve) - 1] = '\0';
 }
 
 esp_err_t system_config_load_from_nvs(system_config_t *config)
@@ -185,6 +211,18 @@ esp_err_t system_config_load_from_nvs(system_config_t *config)
 
     if (nvs_get_i32(nvs_handle, "eff_btn_pin", &i32) == ESP_OK) {
         config->effect_button_pin = (int)i32;
+    }
+
+    if (nvs_get_u8(nvs_handle, "snapcast_en", &u8) == ESP_OK) {
+        config->snapcast_audio_enabled = (u8 != 0);
+    }
+
+    if (nvs_get_u8(nvs_handle, "bluetooth_en", &u8) == ESP_OK) {
+        config->bluetooth_audio_enabled = (u8 != 0);
+    }
+
+    if (nvs_get_u8(nvs_handle, "stop_wifi_bt", &u8) == ESP_OK) {
+        config->stop_wifi_during_bt = (u8 != 0);
     }
 
     size_t len = SYSTEM_CONFIG_MAX_NAME_LEN;
@@ -265,6 +303,69 @@ esp_err_t system_config_load_from_nvs(system_config_t *config)
         config->ap_mode_button_gpio = (int)i32;
     }
 
+    // Load bass mapping settings
+    if (nvs_get_u8(nvs_handle, "bass_map_en", &u8) == ESP_OK) {
+        config->bass_mapping_enabled = (u8 != 0);
+    }
+
+    char bass_str[16];
+    len = sizeof(bass_str);
+    if (nvs_get_str(nvs_handle, "bass_low", bass_str, &len) == ESP_OK) {
+        config->bass_mapping_low_gain = (float)atof(bass_str);
+    }
+
+    len = sizeof(bass_str);
+    if (nvs_get_str(nvs_handle, "bass_high", bass_str, &len) == ESP_OK) {
+        config->bass_mapping_high_gain = (float)atof(bass_str);
+    }
+
+    len = sizeof(config->bass_mapping_curve);
+    if (nvs_get_str(nvs_handle, "bass_curve", config->bass_mapping_curve, &len) != ESP_OK) {
+        // keep default curve
+    }
+
+    // Load mids mapping settings
+    if (nvs_get_u8(nvs_handle, "mids_map_en", &u8) == ESP_OK) {
+        config->mids_mapping_enabled = (u8 != 0);
+    }
+
+    char mids_str[16];
+    len = sizeof(mids_str);
+    if (nvs_get_str(nvs_handle, "mids_low", mids_str, &len) == ESP_OK) {
+        config->mids_mapping_low_gain = (float)atof(mids_str);
+    }
+
+    len = sizeof(mids_str);
+    if (nvs_get_str(nvs_handle, "mids_high", mids_str, &len) == ESP_OK) {
+        config->mids_mapping_high_gain = (float)atof(mids_str);
+    }
+
+    len = sizeof(config->mids_mapping_curve);
+    if (nvs_get_str(nvs_handle, "mids_curve", config->mids_mapping_curve, &len) != ESP_OK) {
+        // keep default curve
+    }
+
+    // Load treble mapping settings
+    if (nvs_get_u8(nvs_handle, "treb_map_en", &u8) == ESP_OK) {
+        config->treble_mapping_enabled = (u8 != 0);
+    }
+
+    char treb_str[16];
+    len = sizeof(treb_str);
+    if (nvs_get_str(nvs_handle, "treb_low", treb_str, &len) == ESP_OK) {
+        config->treble_mapping_low_gain = (float)atof(treb_str);
+    }
+
+    len = sizeof(treb_str);
+    if (nvs_get_str(nvs_handle, "treb_high", treb_str, &len) == ESP_OK) {
+        config->treble_mapping_high_gain = (float)atof(treb_str);
+    }
+
+    len = sizeof(config->treble_mapping_curve);
+    if (nvs_get_str(nvs_handle, "treb_curve", config->treble_mapping_curve, &len) != ESP_OK) {
+        // keep default curve
+    }
+
     nvs_close(nvs_handle);
     ESP_LOGI(TAG, "Loaded system config from NVS: name='%s', vol_up=%d, vol_down=%d, gain=%.2f, buttons=%s",
              config->snapclient_name,
@@ -299,6 +400,15 @@ esp_err_t system_config_save_to_nvs(const system_config_t *config)
     if (err != ESP_OK) goto out;
 
     err = nvs_set_i32(nvs_handle, "eff_btn_pin", (int32_t)config->effect_button_pin);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_u8(nvs_handle, "snapcast_en", config->snapcast_audio_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_u8(nvs_handle, "bluetooth_en", config->bluetooth_audio_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_u8(nvs_handle, "stop_wifi_bt", config->stop_wifi_during_bt ? 1 : 0);
     if (err != ESP_OK) goto out;
 
     err = nvs_set_str(nvs_handle, "name", config->snapclient_name);
@@ -353,6 +463,54 @@ esp_err_t system_config_save_to_nvs(const system_config_t *config)
     if (err != ESP_OK) goto out;
 
     err = nvs_set_i32(nvs_handle, "ap_btn_gpio", (int32_t)config->ap_mode_button_gpio);
+    if (err != ESP_OK) goto out;
+
+    // Save bass mapping settings
+    err = nvs_set_u8(nvs_handle, "bass_map_en", config->bass_mapping_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    char bass_str[16];
+    snprintf(bass_str, sizeof(bass_str), "%.1f", (double)config->bass_mapping_low_gain);
+    err = nvs_set_str(nvs_handle, "bass_low", bass_str);
+    if (err != ESP_OK) goto out;
+
+    snprintf(bass_str, sizeof(bass_str), "%.1f", (double)config->bass_mapping_high_gain);
+    err = nvs_set_str(nvs_handle, "bass_high", bass_str);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "bass_curve", config->bass_mapping_curve);
+    if (err != ESP_OK) goto out;
+
+    // Save mids mapping settings
+    err = nvs_set_u8(nvs_handle, "mids_map_en", config->mids_mapping_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    char mids_str[16];
+    snprintf(mids_str, sizeof(mids_str), "%.1f", (double)config->mids_mapping_low_gain);
+    err = nvs_set_str(nvs_handle, "mids_low", mids_str);
+    if (err != ESP_OK) goto out;
+
+    snprintf(mids_str, sizeof(mids_str), "%.1f", (double)config->mids_mapping_high_gain);
+    err = nvs_set_str(nvs_handle, "mids_high", mids_str);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "mids_curve", config->mids_mapping_curve);
+    if (err != ESP_OK) goto out;
+
+    // Save treble mapping settings
+    err = nvs_set_u8(nvs_handle, "treb_map_en", config->treble_mapping_enabled ? 1 : 0);
+    if (err != ESP_OK) goto out;
+
+    char treb_str[16];
+    snprintf(treb_str, sizeof(treb_str), "%.1f", (double)config->treble_mapping_low_gain);
+    err = nvs_set_str(nvs_handle, "treb_low", treb_str);
+    if (err != ESP_OK) goto out;
+
+    snprintf(treb_str, sizeof(treb_str), "%.1f", (double)config->treble_mapping_high_gain);
+    err = nvs_set_str(nvs_handle, "treb_high", treb_str);
+    if (err != ESP_OK) goto out;
+
+    err = nvs_set_str(nvs_handle, "treb_curve", config->treble_mapping_curve);
     if (err != ESP_OK) goto out;
 
     err = nvs_commit(nvs_handle);

@@ -81,7 +81,7 @@
 
 #include "system_config.h"
 
-static system_config_t g_system_config;
+system_config_t g_system_config;
 
 // Volume control GPIO definitions are taken from system configuration
 #define VOLUME_UP_GPIO   (g_system_config.volume_up_pin)
@@ -513,10 +513,16 @@ void init_snapcast(QueueHandle_t audioQHdl) {
  *
  */
 void audio_set_mute(bool mute) {
+  if (audioDACSemaphore == NULL) {
+    return;
+  }
+
   xSemaphoreTake(audioDACSemaphore, portMAX_DELAY);
   if (mute != audioDAC_data.mute) {
     audioDAC_data.mute = mute;
-    xQueueOverwrite(audioDACQHdl, &audioDAC_data);
+    if (audioDACQHdl != NULL) {
+      xQueueOverwrite(audioDACQHdl, &audioDAC_data);
+    }
   }
   xSemaphoreGive(audioDACSemaphore);
 }
@@ -525,10 +531,16 @@ void audio_set_mute(bool mute) {
  *
  */
 void audio_set_volume(int volume) {
+  if (audioDACSemaphore == NULL) {
+    return;
+  }
+
   xSemaphoreTake(audioDACSemaphore, portMAX_DELAY);
   if (volume != audioDAC_data.volume) {
     audioDAC_data.volume = volume;
-    xQueueOverwrite(audioDACQHdl, &audioDAC_data);
+    if (audioDACQHdl != NULL) {
+      xQueueOverwrite(audioDACQHdl, &audioDAC_data);
+    }
   }
   xSemaphoreGive(audioDACSemaphore);
   
@@ -545,6 +557,11 @@ static int pre_bluetooth_volume = -1;
  * Mute Snapcast when Bluetooth audio starts playing
  */
 void snapcast_mute_for_bluetooth(void) {
+    // Only mute snapcast if it's enabled
+    if (!g_system_config.snapcast_audio_enabled) {
+        return;
+    }
+
     if (pre_bluetooth_volume == -1) {
         pre_bluetooth_volume = scSet.volume; // store even 0
         ESP_LOGI("SC", "Storing Snapcast volume (%d%%) and muting for Bluetooth", pre_bluetooth_volume);
@@ -568,6 +585,11 @@ void snapcast_mute_for_bluetooth(void) {
  * Unmute Snapcast when Bluetooth audio stops
  */
 void snapcast_unmute_after_bluetooth(void) {
+    // Only unmute snapcast if it's enabled
+    if (!g_system_config.snapcast_audio_enabled) {
+        return;
+    }
+
     // Restore previous volume if we have one stored
     if (pre_bluetooth_volume > 0) {
         ESP_LOGI("SC", "Restoring Snapcast volume to %d%% after Bluetooth", pre_bluetooth_volume);
@@ -629,6 +651,24 @@ static void http_get_task(void *pvParameters) {
 #endif
 
   while (1) {
+    if (!g_system_config.snapcast_audio_enabled) {
+      if (lwipNetconn != NULL) {
+        netconn_close(lwipNetconn);
+        netconn_delete(lwipNetconn);
+        lwipNetconn = NULL;
+      }
+
+      // Keep audio muted and avoid processing TCP Snapcast traffic
+      audio_set_mute(true);
+
+#if CONFIG_ENABLE_SH1106_DISPLAY
+      display_set_connection_status(false);
+#endif
+
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      continue;
+    }
+
     // do some house keeping
     {
       received_header = false;
@@ -766,6 +806,10 @@ static void http_get_task(void *pvParameters) {
     }
 
     ESP_LOGI(TAG, "netconn connected");
+
+#if CONFIG_ENABLE_SH1106_DISPLAY
+    display_set_connection_status(true);
+#endif
 
     if (reset_latency_buffer() < 0) {
       ESP_LOGE(TAG,
@@ -2823,6 +2867,25 @@ static void init_led_controller(void)
  * Updates the server with the current volume level for proper synchronization
  */
 static void send_volume_update_to_server(int volume_percent) {
+    // Don't attempt HTTP calls if snapcast is disabled
+    if (!g_system_config.snapcast_audio_enabled) {
+        ESP_LOGD("SC", "Skipping volume update, snapcast disabled");
+        return;
+    }
+
+    // Check WiFi status - don't attempt HTTP if WiFi is stopped
+    wifi_mode_t wifi_mode;
+    if (esp_wifi_get_mode(&wifi_mode) != ESP_OK || wifi_mode != WIFI_MODE_STA) {
+        ESP_LOGD("SC", "Skipping volume update, WiFi not in STA mode");
+        return;
+    }
+
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) {
+        ESP_LOGD("SC", "Skipping volume update, not connected to AP");
+        return;
+    }
+
     // Get external references
     extern struct netconn *lwipNetconn;
     extern ip_addr_t remote_ip;
@@ -3026,7 +3089,9 @@ static void volume_button_task(void *pvParameters) {
                     ESP_LOGI("SC", "Snapcast Volume UP: %d%% -> %d%%", current_volume, new_volume);
                     
                     audio_set_volume(new_volume);
-                    send_volume_update_to_server(new_volume);
+                    if (g_system_config.snapcast_audio_enabled) {
+                        send_volume_update_to_server(new_volume);
+                    }
                 }
                 
                 last_vol_up_time = current_time;
@@ -3056,7 +3121,9 @@ static void volume_button_task(void *pvParameters) {
                     ESP_LOGI("SC", "Snapcast Volume DOWN: %d%% -> %d%%", current_volume, new_volume);
                     
                     audio_set_volume(new_volume);
-                    send_volume_update_to_server(new_volume);
+                    if (g_system_config.snapcast_audio_enabled) {
+                        send_volume_update_to_server(new_volume);
+                    }
                 }
                 
                 last_vol_down_time = current_time;
@@ -3122,7 +3189,13 @@ static void wifi_signal_monitor_task(void *pvParameters) {
         } else {
             // WiFi disconnected
             current_rssi = -100;
-            ESP_LOGW("SC", "WiFi disconnected - RSSI unavailable");
+            
+            // Only log disconnection if we're not in Bluetooth-only mode
+            // (when snapcast is disabled and Bluetooth is enabled, WiFi is intentionally stopped)
+            if (g_system_config.snapcast_audio_enabled || !g_system_config.bluetooth_audio_enabled) {
+                ESP_LOGW("SC", "WiFi disconnected - RSSI unavailable");
+            }
+            
             display_set_wifi_signal(-100, false);  // Show disconnected state
         }
         
@@ -3377,7 +3450,15 @@ void app_main(void) {
 
   QueueHandle_t audioQHdl = xQueueCreate(1, sizeof(audioDACdata_t));
 
-  init_snapcast(audioQHdl);
+  if (g_system_config.snapcast_audio_enabled) {
+      init_snapcast(audioQHdl);
+  } else {
+      ESP_LOGI("AUDIO", "Snapcast audio disabled by config");
+      audioDACQHdl = NULL;
+      audioDACSemaphore = xSemaphoreCreateMutex();
+      audioDAC_data.mute = true;
+      audioDAC_data.volume = -1;
+  }
   init_player(i2s_pin_config0, I2S_NUM_0);
 
 #if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET || \
@@ -3404,7 +3485,11 @@ void app_main(void) {
   //  websocket_if_start();
 
 #if CONFIG_BT_ENABLED
-  bt_audio_init();
+  if (g_system_config.bluetooth_audio_enabled) {
+      bt_audio_init();
+  } else {
+      ESP_LOGI("AUDIO", "Bluetooth audio disabled by config");
+  }
 #endif
 
   net_mdns_register("snapclient");

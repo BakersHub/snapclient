@@ -21,6 +21,8 @@
 #include "esp_wifi.h"
 #include "esp_coexist.h"
 
+extern system_config_t g_system_config;
+
 #ifdef CONFIG_ENABLE_LED_CONTROLLER
 #include "led_controller.h"
 #endif
@@ -45,6 +47,7 @@ static uint8_t s_eq_levels[16] = {0};
 static uint32_t s_last_eq_update = 0;
 static esp_avrc_rn_evt_cap_mask_t s_avrc_peer_rn_cap;
 static bool s_volume_notify = false; // Volume notification state
+static bool wifi_intentionally_stopped = false; // Track when WiFi is stopped for BT-only mode
 
 // Bluetooth metadata storage
 static char bt_current_title[128] = "";
@@ -92,11 +95,32 @@ void bt_audio_sink_init() {
         return;
     }
 
-#if (CONFIG_BT_SSP_ENABLED)
-    /* Set default parameters for Secure Simple Pairing */
-    esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
-    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_IO;
-    esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
+/* Configure Secure Simple Pairing parameters if available in this SDK/config.
+ * Some ESP-IDF releases expose different macro names; guard usage so the
+ * build won't fail on older/newer SDKs where those symbols don't exist.
+ */
+#if defined(CONFIG_BT_SSP_ENABLED) && defined(ESP_BT_SP_IOCAP_MODE)
+    {
+        esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
+        esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_IO;
+        esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
+    }
+#endif
+
+#if defined(CONFIG_BT_SSP_ENABLED) && defined(ESP_BT_SP_AUTHEN_REQ_MODE) && defined(ESP_BT_SP_AUTH_REQ_NO_MITM)
+    {
+        esp_bt_sp_param_t auth_req_type = ESP_BT_SP_AUTHEN_REQ_MODE;
+        uint8_t auth_req = ESP_BT_SP_AUTH_REQ_NO_MITM;
+        esp_bt_gap_set_security_param(auth_req_type, &auth_req, sizeof(uint8_t));
+    }
+#endif
+
+#if defined(CONFIG_BT_SSP_ENABLED) && defined(ESP_BT_SP_CFM_REQ_MODE) && defined(ESP_BT_SP_CFM_REQ_NO)
+    {
+        esp_bt_sp_param_t cfm_req_type = ESP_BT_SP_CFM_REQ_MODE;
+        uint8_t cfm_req = ESP_BT_SP_CFM_REQ_NO;
+        esp_bt_gap_set_security_param(cfm_req_type, &cfm_req, sizeof(uint8_t));
+    }
 #endif
 
     // Initialize AVRC FIRST (critical for proper service discovery)
@@ -171,22 +195,68 @@ bool bt_audio_sink_is_connected() {
     return bt_connected;
 }
 
+static char *bda2str(uint8_t *bda, char *str, size_t size)
+{
+    if (!bda || !str || size < 18) return NULL;
+    sprintf(str, "%02x:%02x:%02x:%02x:%02x:%02x",
+            bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+    return str;
+}
+
 static void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
+    uint8_t *bda = NULL;
+    char bda_str[18] = {0};
+
+    switch (event) {
+        case ESP_BT_GAP_PIN_REQ_EVT: bda = param->pin_req.bda; break;
+        case ESP_BT_GAP_CFM_REQ_EVT: bda = param->cfm_req.bda; break;
+        case ESP_BT_GAP_KEY_NOTIF_EVT: bda = param->key_notif.bda; break;
+        case ESP_BT_GAP_KEY_REQ_EVT: bda = param->key_req.bda; break;
+        case ESP_BT_GAP_AUTH_CMPL_EVT: bda = param->auth_cmpl.bda; break;
+        case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT: bda = param->acl_conn_cmpl_stat.bda; break;
+        case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT: bda = param->acl_disconn_cmpl_stat.bda; break;
+        case ESP_BT_GAP_READ_REMOTE_NAME_EVT: bda = param->read_rmt_name.bda; break;
+        case ESP_BT_GAP_READ_RSSI_DELTA_EVT: bda = NULL; break;
+        default: break;
+    }
+
+    if (bda) bda2str(bda, bda_str, sizeof(bda_str));
+    ESP_LOGI(TAG, "GAP event %d from %s", event, bda ? bda_str : "<no addr>");
+
     switch (event) {
         case ESP_BT_GAP_PIN_REQ_EVT: {
             ESP_LOGI(TAG, "PIN code requested");
-
-            // Respond with your chosen PIN
             esp_bt_pin_code_t pin_code;
-            strcpy((char *)pin_code, "0000");  // 4-digit PIN (default)
+            strcpy((char *)pin_code, "0000");
             esp_bt_gap_pin_reply(param->pin_req.bda, true, 4, pin_code);
             break;
         }
+
+        case ESP_BT_GAP_CFM_REQ_EVT: {
+            ESP_LOGI(TAG, "SSP confirmation requested: numeric value=%" PRIu32, param->cfm_req.num_val);
+#if (CONFIG_BT_SSP_ENABLED)
+            ESP_LOGI(TAG, "Replying YES to SSP confirmation");
+            esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+#else
+            ESP_LOGI(TAG, "SSP not enabled in config - cannot auto-confirm");
+#endif
+            break;
+        }
+
+        case ESP_BT_GAP_KEY_NOTIF_EVT: {
+            ESP_LOGI(TAG, "SSP passkey notification: %" PRIu32, param->key_notif.passkey);
+            break;
+        }
+
+        case ESP_BT_GAP_KEY_REQ_EVT: {
+            ESP_LOGI(TAG, "SSP passkey requested by remote (enter/display on peer) - awaiting user input not supported");
+            break;
+        }
+
         case ESP_BT_GAP_AUTH_CMPL_EVT: {
             if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
                 ESP_LOGI(TAG, "Authentication success: %s", param->auth_cmpl.device_name);
-                // Store device name
                 strncpy(bt_remote_device_name, (char *)param->auth_cmpl.device_name, sizeof(bt_remote_device_name) - 1);
                 bt_remote_device_name[sizeof(bt_remote_device_name) - 1] = '\0';
 #if CONFIG_ENABLE_SH1106_DISPLAY
@@ -197,7 +267,54 @@ static void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *pa
             }
             break;
         }
+
+        case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT: {
+            uint8_t *addr = param->acl_conn_cmpl_stat.bda;
+            ESP_LOGI(TAG, "ACL conn complete to %s, status: 0x%x", bda2str(addr, bda_str, sizeof(bda_str)), param->acl_conn_cmpl_stat.stat);
+            if (param->acl_conn_cmpl_stat.stat == ESP_BT_STATUS_SUCCESS) {
+                // Re-enable interrupts and request remote name
+                esp_bt_gap_read_remote_name(addr);
+            }
+            break;
+        }
+
+        case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT: {
+            uint8_t *addr = param->acl_disconn_cmpl_stat.bda;
+            ESP_LOGI(TAG, "ACL disconn from %s, reason: 0x%x", bda2str(addr, bda_str, sizeof(bda_str)), param->acl_disconn_cmpl_stat.reason);
+            break;
+        }
+
+        case ESP_BT_GAP_READ_REMOTE_NAME_EVT: {
+            if (param->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS) {
+                ESP_LOGI(TAG, "Remote device name: %s", param->read_rmt_name.rmt_name);
+                if (strlen((char*)param->read_rmt_name.rmt_name) > 0) {
+                    strncpy(bt_remote_device_name, (char *)param->read_rmt_name.rmt_name, sizeof(bt_remote_device_name) - 1);
+                    bt_remote_device_name[sizeof(bt_remote_device_name) - 1] = '\0';
+#if CONFIG_ENABLE_SH1106_DISPLAY
+                    display_set_bt_device_name(bt_remote_device_name);
+#endif
+                }
+            } else {
+                ESP_LOGW(TAG, "Failed to read remote device name, status: %d", param->read_rmt_name.stat);
+            }
+            break;
+        }
+
+        case ESP_BT_GAP_READ_RSSI_DELTA_EVT: {
+            if (param->read_rssi_delta.stat == ESP_BT_STATUS_SUCCESS) {
+                int8_t rssi = param->read_rssi_delta.rssi_delta;
+                ESP_LOGI(TAG, "Bluetooth RSSI: %d dBm", rssi);
+#if CONFIG_ENABLE_SH1106_DISPLAY
+                display_set_bt_signal(true, rssi);
+#endif
+            } else {
+                ESP_LOGW(TAG, "Failed to read RSSI delta, status: %d", param->read_rssi_delta.stat);
+            }
+            break;
+        }
+
         default:
+            ESP_LOGI(TAG, "Unhandled GAP event: %d", event);
             break;
     }
 }
@@ -236,9 +353,22 @@ static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 override_player();
                 // Mute Snapcast when Bluetooth audio starts
                 snapcast_mute_for_bluetooth();
-                // 🔽 Give Bluetooth priority over WiFi
+
+                // Stop WiFi while Bluetooth audio is playing to reduce RF interference
+                // and free ESP32 resources for A2DP playback.
+                if (!wifi_intentionally_stopped) {
+                    esp_err_t err = esp_wifi_stop();
+                    if (err == ESP_OK) {
+                        wifi_intentionally_stopped = true;
+                        ESP_LOGI(TAG, "Bluetooth playing => WiFi stopped to reduce interference");
+                    } else {
+                        ESP_LOGW(TAG, "Bluetooth playing => unable to stop WiFi: %s", esp_err_to_name(err));
+                    }
+                }
+
+                // 🔽 Give Bluetooth priority over WiFi if WiFi remains active
                 esp_coex_preference_set(ESP_COEX_PREFER_BT);
-                // 🔽 Reduce WiFi RF interference
+                // 🔽 Reduce WiFi RF interference when WiFi is still on
                 esp_wifi_set_max_tx_power(40);  // try 40–52 first
                 esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 #if CONFIG_ENABLE_SH1106_DISPLAY
@@ -261,6 +391,18 @@ static void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param) {
                 deoverride_player();
                 // Unmute Snapcast when Bluetooth audio stops
                 snapcast_unmute_after_bluetooth();
+
+                // Restore WiFi only if we intentionally stopped it for BT audio
+                if (wifi_intentionally_stopped) {
+                    ESP_LOGI(TAG, "Bluetooth stopped => restarting WiFi");
+                    esp_err_t err = esp_wifi_start();
+                    if (err == ESP_OK) {
+                        wifi_intentionally_stopped = false;
+                    } else {
+                        ESP_LOGW(TAG, "Failed to restart WiFi after Bluetooth stopped: %s", esp_err_to_name(err));
+                    }
+                }
+
                 // 🔽 Restore WiFi priority
                 esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
                 // 🔽 Restore WiFi power
@@ -703,6 +845,10 @@ static void bt_app_a2d_data_cb(const uint8_t *data, uint32_t len) {
         // Queue full - drop this chunk to prevent memory buildup
         free_pcm_chunk(pcmChunk);
     }
+}
+
+bool bt_audio_is_wifi_intentionally_stopped() {
+    return wifi_intentionally_stopped;
 }
 
 

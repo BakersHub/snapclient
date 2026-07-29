@@ -39,11 +39,33 @@
 #include "led_config_nvs.h"
 #endif
 
+#include "bt_audio_sink.h"
+
 static const char *TAG = "HTTP";
 
 static QueueHandle_t xQueueHttp;
 
 static esp_netif_t *netInterface = NULL;
+
+/* Forward declarations */
+static int find_key_value(char *key, char *parameter, char *value);
+static esp_err_t bass_map_handler(httpd_req_t *req);
+static esp_err_t get_bass_map_handler(httpd_req_t *req);
+static esp_err_t set_bass_map_handler(httpd_req_t *req);
+static esp_err_t dsp_eq_handler(httpd_req_t *req);
+static esp_err_t bass_map_options_handler(httpd_req_t *req);
+static esp_err_t dsp_eq_options_handler(httpd_req_t *req);
+
+/*
+ * Suppress HTTP server socket error logs when WiFi is intentionally stopped
+ */
+void suppress_http_logs_when_wifi_stopped() {
+  if (bt_audio_is_wifi_intentionally_stopped()) {
+    esp_log_level_set("httpd", ESP_LOG_NONE);
+  } else {
+    esp_log_level_set("httpd", ESP_LOG_INFO);
+  }
+}
 
 /*
  * Decode URL-encoded form values in-place (e.g. "JBL%20adapter" -> "JBL adapter").
@@ -187,6 +209,213 @@ static esp_err_t dsp_config_get_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "application/json");
   httpd_resp_sendstr(req, json);
   return ESP_OK;
+}
+
+// -------------------------------------------
+// Handler for Dynamic Bass Mapping
+// -------------------------------------------
+static esp_err_t bass_map_options_handler(httpd_req_t *req) {
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_send(req, "", 0);
+    return ESP_OK;
+}
+
+static esp_err_t dsp_eq_options_handler(httpd_req_t *req) {
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_send(req, "", 0);
+    return ESP_OK;
+}
+
+static esp_err_t bass_map_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Bass map handler called with method: %d", req->method);
+    if (req->method == HTTP_GET) {
+        return get_bass_map_handler(req);
+    } else if (req->method == HTTP_POST) {
+        return set_bass_map_handler(req);
+    } else {
+        ESP_LOGW(TAG, "Unsupported method %d for /bass_map", req->method);
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+}
+
+static esp_err_t get_bass_map_handler(httpd_req_t *req) {
+    bool enabled = dsp_processor_get_dynamic_bass_enabled();
+    float low_gain, high_gain;
+    dsp_processor_get_bass_mapping(&low_gain, &high_gain);
+
+    char json[128];
+    snprintf(json, sizeof(json),
+             "{\"enabled\":%s,\"low_vol_gain\":%.1f,\"high_vol_gain\":%.1f}",
+             enabled ? "true" : "false",
+             (double)low_gain, (double)high_gain);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    return ESP_OK;
+}
+
+static esp_err_t set_bass_map_handler(httpd_req_t *req) {
+    char content[512];
+    size_t total_len = req->content_len;
+    if (total_len >= sizeof(content)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Content too long");
+        return ESP_FAIL;
+    }
+
+    size_t received = 0;
+    while (received < total_len) {
+        int ret = httpd_req_recv(req, content + received, total_len - received);
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
+            }
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    content[received] = '\0';
+
+    char value[64];
+    bool enabled = false;
+    float low_gain = 0.0f;
+    float high_gain = 0.0f;
+    char curve[16] = "linear";
+
+    if (find_key_value("enabled=", content, value)) {
+        enabled = (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+    }
+
+    if (find_key_value("low_vol_gain=", content, value) || find_key_value("low_gain=", content, value)) {
+        low_gain = (float)atof(value);
+    }
+
+    if (find_key_value("high_vol_gain=", content, value) || find_key_value("high_gain=", content, value)) {
+        high_gain = (float)atof(value);
+    }
+
+    if (find_key_value("curve=", content, value)) {
+        strncpy(curve, value, sizeof(curve) - 1);
+        curve[sizeof(curve) - 1] = '\0';
+    }
+
+    // Update DSP processor
+    dsp_processor_set_dynamic_bass(enabled);
+    dsp_processor_set_bass_mapping(low_gain, high_gain);
+
+    ESP_LOGI(TAG, "Bass mapping updated: enabled=%d, low_gain=%.1f, high_gain=%.1f, curve=%s",
+             enabled, (double)low_gain, (double)high_gain, curve);
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "Bass mapping updated");
+    return ESP_OK;
+}
+
+static esp_err_t dsp_eq_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
+        return ESP_FAIL;
+    }
+
+    char content[1024];
+    size_t total_len = req->content_len;
+    if (total_len >= sizeof(content)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Content too long");
+        return ESP_FAIL;
+    }
+
+    size_t received = 0;
+    while (received < total_len) {
+        int ret = httpd_req_recv(req, content + received, total_len - received);
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                httpd_resp_send_408(req);
+            }
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    content[received] = '\0';
+
+    char value[64];
+    char curve_value[16];  // For curve strings only
+    
+    // Parse bass parameters
+    bool bass_enabled = false;
+    float bass_low_gain = 0.0f;
+    float bass_high_gain = 0.0f;
+    char bass_curve[16] = "linear";
+    
+    if (find_key_value("bass_enabled=", content, value)) {
+        bass_enabled = (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+    }
+    if (find_key_value("bass_low_gain=", content, value)) {
+        bass_low_gain = (float)atof(value);
+    }
+    if (find_key_value("bass_high_gain=", content, value)) {
+        bass_high_gain = (float)atof(value);
+    }
+    if (find_key_value("bass_curve=", content, curve_value)) {
+        memcpy(bass_curve, curve_value, sizeof(bass_curve) - 1);
+        bass_curve[sizeof(bass_curve) - 1] = '\0';
+    }
+    
+    // Parse treble parameters
+    bool treble_enabled = false;
+    float treble_low_gain = 0.0f;
+    float treble_high_gain = 0.0f;
+    char treble_curve[16] = "linear";
+    
+    if (find_key_value("treble_enabled=", content, value)) {
+        treble_enabled = (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+    }
+    if (find_key_value("treble_low_gain=", content, value)) {
+        treble_low_gain = (float)atof(value);
+    }
+    if (find_key_value("treble_high_gain=", content, value)) {
+        treble_high_gain = (float)atof(value);
+    }
+    if (find_key_value("treble_curve=", content, curve_value)) {
+        memcpy(treble_curve, curve_value, sizeof(treble_curve) - 1);
+        treble_curve[sizeof(treble_curve) - 1] = '\0';
+    }
+    
+    // Update DSP processor
+    dsp_processor_set_dynamic_bass(bass_enabled);
+    dsp_processor_set_bass_mapping(bass_low_gain, bass_high_gain);
+    
+    dsp_processor_set_dynamic_treble(treble_enabled);
+    dsp_processor_set_treble_mapping(treble_low_gain, treble_high_gain);
+    
+    // Update system config and save to NVS
+    system_config_t config;
+    system_config_load_from_nvs(&config);
+    
+    config.bass_mapping_enabled = bass_enabled;
+    config.bass_mapping_low_gain = bass_low_gain;
+    config.bass_mapping_high_gain = bass_high_gain;
+    strncpy(config.bass_mapping_curve, bass_curve, sizeof(config.bass_mapping_curve) - 1);
+    config.bass_mapping_curve[sizeof(config.bass_mapping_curve) - 1] = '\0';
+    
+    config.treble_mapping_enabled = treble_enabled;
+    config.treble_mapping_low_gain = treble_low_gain;
+    config.treble_mapping_high_gain = treble_high_gain;
+    strncpy(config.treble_mapping_curve, treble_curve, sizeof(config.treble_mapping_curve) - 1);
+    config.treble_mapping_curve[sizeof(config.treble_mapping_curve) - 1] = '\0';
+    
+    system_config_save_to_nvs(&config);
+    
+    ESP_LOGI(TAG, "EQ updated: bass=%d(%.1f-%.1f), treble=%d(%.1f-%.1f)",
+             bass_enabled, (double)bass_low_gain, (double)bass_high_gain,
+             treble_enabled, (double)treble_low_gain, (double)treble_high_gain);
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "2-Band EQ updated");
+    return ESP_OK;
 }
 
 /**
@@ -673,7 +902,6 @@ static esp_err_t led_config_handler(httpd_req_t *req) {
  */
 static esp_err_t system_config_get_handler(httpd_req_t *req) {
   system_config_t cfg;
-  system_config_set_defaults(&cfg);
   system_config_load_from_nvs(&cfg);
 
   char json[1280];
@@ -684,10 +912,12 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            "\"volume_buttons_enabled\":%s,\"volume_up_pin\":%d,\"volume_down_pin\":%d,"
            "\"effect_button_enabled\":%s,\"effect_button_pin\":%d,"
            "\"ap_mode_button_gpio\":%d,"
+           "\"snapcast_audio_enabled\":%s,\"bluetooth_audio_enabled\":%s,"
            "\"sh1106_enabled\":%s,\"sh1106_sda_gpio\":%d,\"sh1106_scl_gpio\":%d,\"sh1106_i2c_freq_hz\":%d,"
            "\"sh1106_column_offset\":%d,"
            "\"i2s_mclk_pin\":%d,\"i2s_bck_pin\":%d,\"i2s_lrck_pin\":%d,\"i2s_dataout_pin\":%d,"
-           "\"pcm5102a_mute_pin\":%d}",
+           "\"pcm5102a_mute_pin\":%d,"
+           "\"bass_mapping_enabled\":%s,\"bass_mapping_low_gain\":%.1f,\"bass_mapping_high_gain\":%.1f,\"bass_mapping_curve\":\"%s\"}",
            cfg.snapclient_name,
            (double)cfg.snapcast_gain_boost,
            cfg.wifi_ssid,
@@ -699,7 +929,9 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            cfg.volume_down_pin,
            cfg.effect_button_enabled ? "true" : "false",
            cfg.effect_button_pin,
-           cfg.ap_mode_button_gpio,               
+           cfg.ap_mode_button_gpio,
+           cfg.snapcast_audio_enabled ? "true" : "false",
+           cfg.bluetooth_audio_enabled ? "true" : "false",
            cfg.sh1106_enabled ? "true" : "false",
            cfg.sh1106_sda_gpio,
            cfg.sh1106_scl_gpio,
@@ -709,7 +941,11 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
            cfg.i2s_bck_pin,
            cfg.i2s_lrck_pin,
            cfg.i2s_dataout_pin,
-           cfg.pcm5102a_mute_pin);
+           cfg.pcm5102a_mute_pin,
+           cfg.bass_mapping_enabled ? "true" : "false",
+           (double)cfg.bass_mapping_low_gain,
+           (double)cfg.bass_mapping_high_gain,
+           cfg.bass_mapping_curve);
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_sendstr(req, json);
@@ -722,7 +958,7 @@ static esp_err_t system_config_get_handler(httpd_req_t *req) {
 static esp_err_t system_config_post_handler(httpd_req_t *req) {
   // Allow a reasonably large config payload so all fields
   // (including newer ones like sh1106_column_offset) are received.
-  char content[512];
+  char content[1024];
   size_t total_len = req->content_len;
   if (total_len >= sizeof(content)) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Content too long");
@@ -743,7 +979,8 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
   content[received] = '\0';
 
   system_config_t cfg;
-  system_config_set_defaults(&cfg);
+
+  
   system_config_load_from_nvs(&cfg);
 
   char value[64];
@@ -804,6 +1041,14 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
 
   if (find_key_value("effect_button_pin=", content, value)) {
     cfg.effect_button_pin = atoi(value);
+  }
+
+  if (find_key_value("snapcast_audio_enabled=", content, value)) {
+    cfg.snapcast_audio_enabled = (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+  }
+
+  if (find_key_value("bluetooth_audio_enabled=", content, value)) {
+    cfg.bluetooth_audio_enabled = (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
   }
 
   if (find_key_value("sh1106_enabled=", content, value)) {
@@ -874,6 +1119,33 @@ static esp_err_t system_config_post_handler(httpd_req_t *req) {
     }
   }
 
+  if (find_key_value("cfgGpioPin=", content, value)) {
+    int pin = atoi(value);
+    if (pin >= 0 && pin <= 39) {  // valid ESP32 GPIO range
+        cfg.cfg_gpio_pin = pin;
+    }
+  }
+
+  // Parse bass mapping settings
+  if (find_key_value("bass_mapping_enabled=", content, value)) {
+    cfg.bass_mapping_enabled = (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+  }
+
+  if (find_key_value("bass_mapping_low_gain=", content, value)) {
+    cfg.bass_mapping_low_gain = (float)atof(value);
+  }
+
+  if (find_key_value("bass_mapping_high_gain=", content, value)) {
+    cfg.bass_mapping_high_gain = (float)atof(value);
+  }
+
+  if (find_key_value("bass_mapping_curve=", content, value)) {
+    url_decode_inplace(value);
+    strncpy(cfg.bass_mapping_curve, value, sizeof(cfg.bass_mapping_curve) - 1);
+    cfg.bass_mapping_curve[sizeof(cfg.bass_mapping_curve) - 1] = '\0';
+  }
+
+  // Save to NVS
   if (system_config_save_to_nvs(&cfg) == ESP_OK) {
     ESP_LOGI(TAG,
              "System config saved, will restart in 2 seconds (name='%s', up=%d, down=%d, gain=%.2f, buttons=%s)",
@@ -904,8 +1176,8 @@ esp_err_t start_server(const char *base_path, int port) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port;
   // We have several endpoints (/ , /post, /favicon, /led*, /system/config,
-  // /dsp/config), so increase the URI handler limit above the default (8).
-  config.max_uri_handlers = 10;
+  // /dsp/config, /bass_map*), so increase the URI handler limit above the default (8).
+  config.max_uri_handlers = 15;
   // Allow a couple of concurrent HTTP connections (HTML, /led, /system/config)
   // and purge least-recently-used sockets if the limit is hit. Keep-alive
   // is disabled so sockets are closed promptly after each request, which
@@ -992,6 +1264,70 @@ esp_err_t start_server(const char *base_path, int port) {
              esp_err_to_name(dsp_reg_res));
   }
 
+  /* URI handler for Dynamic Bass Mapping (GET and POST) */
+  httpd_uri_t bass_map_get_uri = {
+      .uri      = "/bass_map",
+      .method   = HTTP_GET,
+      .handler  = bass_map_handler,
+      .user_ctx = NULL
+  };
+  esp_err_t bass_get_reg = httpd_register_uri_handler(server, &bass_map_get_uri);
+  if (bass_get_reg != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register /bass_map GET handler: %s",
+             esp_err_to_name(bass_get_reg));
+  }
+
+  httpd_uri_t bass_map_post_uri = {
+      .uri      = "/bass_map",
+      .method   = HTTP_POST,
+      .handler  = bass_map_handler,
+      .user_ctx = NULL
+  };
+  esp_err_t bass_post_reg = httpd_register_uri_handler(server, &bass_map_post_uri);
+  if (bass_post_reg != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register /bass_map POST handler: %s",
+             esp_err_to_name(bass_post_reg));
+  }
+
+  /* URI handler for OPTIONS (CORS preflight) */
+  httpd_uri_t bass_map_options_uri = {
+      .uri      = "/bass_map",
+      .method   = HTTP_OPTIONS,
+      .handler  = bass_map_options_handler,
+      .user_ctx = NULL
+  };
+  esp_err_t bass_options_reg = httpd_register_uri_handler(server, &bass_map_options_uri);
+  if (bass_options_reg != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register /bass_map OPTIONS handler: %s",
+             esp_err_to_name(bass_options_reg));
+  }
+
+  /* URI handler for /dsp/eq (unified 3-band EQ) */
+  httpd_uri_t dsp_eq_uri = {
+      .uri      = "/dsp/eq",
+      .method   = HTTP_POST,
+      .handler  = dsp_eq_handler,
+      .user_ctx = NULL
+  };
+  esp_err_t dsp_eq_reg = httpd_register_uri_handler(server, &dsp_eq_uri);
+  if (dsp_eq_reg != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register /dsp/eq POST handler: %s",
+             esp_err_to_name(dsp_eq_reg));
+  }
+
+  /* URI handler for OPTIONS (CORS preflight) for /dsp/eq */
+  httpd_uri_t dsp_eq_options_uri = {
+      .uri      = "/dsp/eq",
+      .method   = HTTP_OPTIONS,
+      .handler  = dsp_eq_options_handler,
+      .user_ctx = NULL
+  };
+  esp_err_t dsp_eq_options_reg = httpd_register_uri_handler(server, &dsp_eq_options_uri);
+  if (dsp_eq_options_reg != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register /dsp/eq OPTIONS handler: %s",
+             esp_err_to_name(dsp_eq_options_reg));
+  }
+
   return ESP_OK;
 }
 
@@ -1073,6 +1409,9 @@ static void http_server_task(void *pvParameters) {
 
   URL_t urlBuf;
   while (1) {
+    // Check WiFi status and suppress HTTP logs if WiFi is intentionally stopped
+    suppress_http_logs_when_wifi_stopped();
+
     //	  ESP_LOGW (TAG, "stack free: %d", uxTaskGetStackHighWaterMark(NULL));
 
     // Waiting for post

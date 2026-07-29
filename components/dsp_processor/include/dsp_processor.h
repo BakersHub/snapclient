@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include "esp_err.h"
+#include <stdbool.h>
 
 typedef enum dspFlows {
   dspfStereo,
@@ -67,6 +68,18 @@ void dsp_processor_uninit(void);
 int dsp_processor_worker(char *audio, size_t chunk_size, uint32_t samplerate);
 esp_err_t dsp_processor_update_filter_params(filterParams_t *params);
 void dsp_processor_set_volome(double volume);
+
+// --- Dynamic Bass Mapping API ---
+void dsp_processor_set_dynamic_bass(bool enabled);
+void dsp_processor_set_bass_mapping(float low_gain, float high_gain);
+bool dsp_processor_get_dynamic_bass_enabled(void);
+void dsp_processor_get_bass_mapping(float *low_gain, float *high_gain);
+
+// --- Dynamic Treble Mapping API ---
+void dsp_processor_set_dynamic_treble(bool enabled);
+void dsp_processor_set_treble_mapping(float low_gain, float high_gain);
+bool dsp_processor_get_dynamic_treble_enabled(void);
+void dsp_processor_get_treble_mapping(float *low_gain, float *high_gain);
 
 #ifdef __cplusplus
 }

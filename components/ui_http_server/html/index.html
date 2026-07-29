@@ -405,6 +405,16 @@
 			<input type="text" id="sysName" maxlength="31" placeholder="Snapclient">
 		</div>
 
+		<div class="led-control-group">
+			<label for="sysSnapcastEnable">Enable Snapcast Audio:</label>
+			<input type="checkbox" id="sysSnapcastEnable" checked>
+		</div>
+
+		<div class="led-control-group">
+			<label for="sysBluetoothEnable">Enable Bluetooth Audio:</label>
+			<input type="checkbox" id="sysBluetoothEnable" checked>
+		</div>
+
 		<div class="section-separator">Volume Buttons & Snapcast Gain</div>
 
 		<div class="led-control-group">
@@ -531,7 +541,104 @@
 			</span>
 		</div>
 
-		<button onclick="saveSystemConfig()" style="margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem;">
+		<div class="section-separator">🎛️ Dynamic 2-Band EQ Mapping</div>
+
+		<!-- Unified EQ Graph -->
+		<div class="led-control-group">
+			<label>Volume-Adaptive EQ Response (Color-Coded Curves):</label>
+			<div style="display: flex; gap: 8px;">
+				<!-- Y-axis labels -->
+				<div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 9px; color: #666; text-align: right; min-width: 35px;">
+					<span>+20dB</span>
+					<span>0dB</span>
+					<span>-20dB</span>
+				</div>
+				<!-- Canvas -->
+				<div>
+					<canvas id="eqUnifiedCanvas" width="400" height="200" style="border: 2px solid #333; display: block; background: #f5f5f5; border-radius: 4px;"></canvas>
+					<!-- X-axis labels below canvas -->
+					<div style="display: flex; justify-content: space-between; font-size: 9px; color: #666; margin-top: 4px; padding: 0 5px;">
+						<span>0%</span>
+						<span>Input Volume</span>
+						<span>100%</span>
+					</div>
+				</div>
+			</div>
+			<div style="font-size: 10px; color: #666; margin-top: 8px; display: flex; justify-content: space-around;">
+				<span>🔴 Bass (300Hz)</span>
+				<span>🟡 Treble (4kHz)</span>
+			</div>
+		</div>
+
+		<!-- Bass Band Controls -->
+		<div style="border-left: 4px solid #ff6b6b; padding-left: 10px; margin: 10px 0;">
+			<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+				<input type="checkbox" id="bassEnabled" onchange="updateEQGraph()">
+				<label style="font-weight: bold; color: #ff6b6b;">BASS</label>
+				<span style="font-size: 10px; color: #666;">(Low-shelf @ 300Hz)</span>
+			</div>
+			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 20px;">
+				<div>
+					<label style="font-size: 11px;">Low Vol:</label>
+					<input type="number" id="bassLow" min="-20" max="20" step="0.1" value="0.0" onchange="updateEQGraph()" style="width: 100%;">
+					<span style="font-size: 9px; color: #666;">dB</span>
+				</div>
+				<div>
+					<label style="font-size: 11px;">High Vol:</label>
+					<input type="number" id="bassHigh" min="-20" max="20" step="0.1" value="0.0" onchange="updateEQGraph()" style="width: 100%;">
+					<span style="font-size: 9px; color: #666;">dB</span>
+				</div>
+			</div>
+			<div style="margin-left: 20px; margin-top: 6px;">
+				<label style="font-size: 11px;">Curve:</label>
+				<select id="bassCurve" onchange="updateEQGraph()" style="font-size: 10px;">
+					<option value="linear">Linear</option>
+					<option value="exponential">Exponential</option>
+					<option value="logarithmic">Logarithmic</option>
+				</select>
+			</div>
+		</div>
+
+		<!-- Treble Band Controls -->
+		<div style="border-left: 4px solid #ffd700; padding-left: 10px; margin: 10px 0;">
+			<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+				<input type="checkbox" id="trebleEnabled" onchange="updateEQGraph()">
+				<label style="font-weight: bold; color: #ffd700;">TREBLE</label>
+				<span style="font-size: 10px; color: #666;">(High-shelf @ 4kHz)</span>
+			</div>
+			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 20px;">
+				<div>
+					<label style="font-size: 11px;">Low Vol:</label>
+					<input type="number" id="trebleLow" min="-20" max="20" step="0.1" value="0.0" onchange="updateEQGraph()" style="width: 100%;">
+					<span style="font-size: 9px; color: #666;">dB</span>
+				</div>
+				<div>
+					<label style="font-size: 11px;">High Vol:</label>
+					<input type="number" id="trebleHigh" min="-20" max="20" step="0.1" value="0.0" onchange="updateEQGraph()" style="width: 100%;">
+					<span style="font-size: 9px; color: #666;">dB</span>
+				</div>
+			</div>
+			<div style="margin-left: 20px; margin-top: 6px;">
+				<label style="font-size: 11px;">Curve:</label>
+				<select id="trebleCurve" onchange="updateEQGraph()" style="font-size: 10px;">
+					<option value="linear">Linear</option>
+					<option value="exponential">Exponential</option>
+					<option value="logarithmic">Logarithmic</option>
+				</select>
+			</div>
+		</div>
+
+		<!-- Control Buttons -->
+		<div style="display: flex; gap: 10px; margin: 15px 0;">
+			<button onclick="updateDynamicEQ()" style="flex: 1; padding: 10px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+				📡 Apply EQ Mapping
+			</button>
+			<button onclick="resetDynamicEQ()" style="flex: 1; padding: 10px 16px; background: #666; color: white; border: none; border-radius: 4px; cursor: pointer;">
+				↺ Reset
+			</button>
+		</div>
+
+		<button onclick="saveSystemConfig()" style="width: 100%; margin: 15px 0; padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold;">
 			💾 Save System Config & Restart
 		</button>
 
@@ -542,13 +649,12 @@
 		// DSP Processor Functions
 		function sendUpdateSlider() {
 			var gain_1 = document.getElementById('BaseGainSlider').value;
-			var gain_2 = document.getElementById('MidGainSlider').value;
 			var gain_3 = document.getElementById('heightsGainSlider').value;
 
-			console.log(gain_1 + ", " + gain_2 + ", " + gain_3);
-			console.log("/post?gain_1=" + gain_1 + "&gain_2=" + gain_2 + "&gain_3=" + gain_3);
+			console.log(gain_1 + ", " + gain_3);
+			console.log("/post?gain_1=" + gain_1 + "&gain_3=" + gain_3);
 			var httpRequest = new XMLHttpRequest();
-			httpRequest.open("POST", "/post?gain_1=" + gain_1 + "&gain_2=" + gain_2 + "&gain_3=" + gain_3, true);
+			httpRequest.open("POST", "/post?gain_1=" + gain_1 + "&gain_3=" + gain_3, true);
 			httpRequest.send();
 		}
 
@@ -851,6 +957,12 @@
 					if (typeof data.effect_button_pin !== 'undefined') {
 						document.getElementById('sysEffectButtonPin').value = data.effect_button_pin;
 					}
+					if (typeof data.snapcast_audio_enabled !== 'undefined') {
+						document.getElementById('sysSnapcastEnable').checked = !!data.snapcast_audio_enabled;
+					}
+					if (typeof data.bluetooth_audio_enabled !== 'undefined') {
+						document.getElementById('sysBluetoothEnable').checked = !!data.bluetooth_audio_enabled;
+					}
 					if (typeof data.sh1106_enabled !== 'undefined') {
 						document.getElementById('sysDisplayEnable').checked = !!data.sh1106_enabled;
 					}
@@ -898,6 +1010,13 @@
 		}
 
 		function saveSystemConfig() {
+			var enableSnapcast = document.getElementById('sysSnapcastEnable').checked;
+			var enableBluetooth = document.getElementById('sysBluetoothEnable').checked;
+			if (!enableSnapcast && !enableBluetooth) {
+				alert('Please enable at least one audio source (Snapcast or Bluetooth).');
+				document.getElementById('systemStatus').textContent = 'Error: both audio sources disabled';
+				return;
+			}
 			var params = 'snapclient_name=' + encodeURIComponent(document.getElementById('sysName').value) +
 				'&snapcast_gain_boost=' + encodeURIComponent(document.getElementById('sysGainBoost').value) +
 				'&wifi_ssid=' + encodeURIComponent(document.getElementById('sysWifiSsid').value) +
@@ -909,6 +1028,8 @@
 				'&volume_down_pin=' + document.getElementById('sysVolDownPin').value +
 				'&effect_button_enabled=' + (document.getElementById('sysEffectButton').checked ? '1' : '0') +
 				'&effect_button_pin=' + document.getElementById('sysEffectButtonPin').value +
+				'&snapcast_audio_enabled=' + (enableSnapcast ? '1' : '0') +
+				'&bluetooth_audio_enabled=' + (enableBluetooth ? '1' : '0') +
 				'&sh1106_enabled=' + (document.getElementById('sysDisplayEnable').checked ? '1' : '0') +
 				'&sh1106_sda_gpio=' + document.getElementById('sysI2cSda').value +
 				'&sh1106_scl_gpio=' + document.getElementById('sysI2cScl').value +
@@ -919,9 +1040,8 @@
 				'&i2s_lrck_pin=' + document.getElementById('sysI2sLrck').value +
 				'&i2s_dataout_pin=' + document.getElementById('sysI2sData').value +
 				'&pcm5102a_mute_pin=' + document.getElementById('sysPcmMute').value +
-				'&ap_mode_button_gpio=' + document.getElementById('sysApBtnGpio').value;
-
-			document.getElementById('systemStatus').textContent = '💾 Saving system config...';
+				'&ap_mode_button_gpio=' + document.getElementById('sysApBtnGpio').value +
+			'&cfg_gpio_pin=' + document.getElementById('cfgGpioPin').value;
 			document.getElementById('systemStatus').style.background = '#fff3cd';
 			document.getElementById('systemStatus').style.color = '#856404';
 
@@ -950,12 +1070,206 @@
 			if (!panel) return;
 			panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none';
 		}
-		
+
+		// Dynamic 3-Band EQ Functions
+
+		function updateEQGraph() {
+			drawEQUnified();
+		}
+
+		function drawEQUnified() {
+			var canvas = document.getElementById('eqUnifiedCanvas');
+			var ctx = canvas.getContext('2d');
+			var width = canvas.width;
+			var height = canvas.height;
+			var centerY = height / 2;
+
+			// Clear canvas
+			ctx.fillStyle = '#f5f5f5';
+			ctx.fillRect(0, 0, width, height);
+
+			// Draw center line (0 dB)
+			ctx.strokeStyle = '#ddd';
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			ctx.moveTo(0, centerY);
+			ctx.lineTo(width, centerY);
+			ctx.stroke();
+
+			// Draw grid
+			ctx.strokeStyle = '#eee';
+			ctx.lineWidth = 1;
+			for (var i = 1; i <= 5; i++) {
+				var y = centerY - (i / 5) * (height / 2);
+				ctx.beginPath();
+				ctx.moveTo(0, y);
+				ctx.lineTo(width, y);
+				ctx.stroke();
+				
+				y = centerY + (i / 5) * (height / 2);
+				ctx.beginPath();
+				ctx.moveTo(0, y);
+				ctx.lineTo(width, y);
+				ctx.stroke();
+			}
+
+			// Draw bass curve
+			if (document.getElementById('bassEnabled').checked) {
+				drawSingleCurve(ctx, width, height, centerY, 
+					parseFloat(document.getElementById('bassLow').value),
+					parseFloat(document.getElementById('bassHigh').value),
+					document.getElementById('bassCurve').value,
+					'#ff6b6b', 2);
+			}
+
+			// Draw treble curve
+			if (document.getElementById('trebleEnabled').checked) {
+				drawSingleCurve(ctx, width, height, centerY,
+					parseFloat(document.getElementById('trebleLow').value),
+					parseFloat(document.getElementById('trebleHigh').value),
+					document.getElementById('trebleCurve').value,
+					'#ffd700', 2);
+			}
+		}
+
+		function drawSingleCurve(ctx, width, height, centerY, lowGain, highGain, curve, color, lineWidth) {
+			ctx.strokeStyle = color;
+			ctx.lineWidth = lineWidth;
+			ctx.beginPath();
+
+			for (var i = 0; i <= width; i++) {
+				var vol = i / width; // 0 to 1
+				var gain = calculateDynamicGain(vol, lowGain, highGain, curve);
+				var y = centerY - (gain / 20) * (height / 2); // Map -20 to +20 dB to canvas
+
+				if (i === 0) {
+					ctx.moveTo(i, y);
+				} else {
+					ctx.lineTo(i, y);
+				}
+			}
+			ctx.stroke();
+
+			// Draw control points
+			ctx.fillStyle = color;
+			ctx.beginPath();
+			var yLow = centerY - (lowGain / 20) * (height / 2);
+			ctx.arc(0, yLow, 4, 0, 2 * Math.PI);
+			ctx.fill();
+
+			ctx.beginPath();
+			var yHigh = centerY - (highGain / 20) * (height / 2);
+			ctx.arc(width, yHigh, 4, 0, 2 * Math.PI);
+			ctx.fill();
+		}
+
+		function calculateDynamicGain(volume, lowGain, highGain, curve) {
+			var t = volume; // 0 to 1
+			var gain;
+
+			switch (curve) {
+				case 'linear':
+					gain = lowGain + (highGain - lowGain) * t;
+					break;
+				case 'exponential':
+					gain = lowGain + (highGain - lowGain) * (Math.pow(2, t * 4) - 1) / 15;
+					break;
+				case 'logarithmic':
+					gain = lowGain + (highGain - lowGain) * Math.log10(t * 9 + 1);
+					break;
+				default:
+					gain = lowGain + (highGain - lowGain) * t;
+			}
+
+			return Math.max(-20, Math.min(20, gain)); // Clamp to -20 to +20 dB
+		}
+
+		function updateDynamicEQ() {
+			var params = 'bass_enabled=' + (document.getElementById('bassEnabled').checked ? '1' : '0') +
+				'&bass_low_gain=' + document.getElementById('bassLow').value +
+				'&bass_high_gain=' + document.getElementById('bassHigh').value +
+				'&bass_curve=' + encodeURIComponent(document.getElementById('bassCurve').value) +
+				'&treble_enabled=' + (document.getElementById('trebleEnabled').checked ? '1' : '0') +
+				'&treble_low_gain=' + document.getElementById('trebleLow').value +
+				'&treble_high_gain=' + document.getElementById('trebleHigh').value +
+				'&treble_curve=' + encodeURIComponent(document.getElementById('trebleCurve').value);
+
+			fetch('/dsp/eq', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				body: params
+			})
+			.then(response => response.text())
+			.then(data => {
+				document.getElementById('systemStatus').textContent = '✓ ' + data;
+				drawEQUnified();
+			})
+			.catch(error => {
+				document.getElementById('systemStatus').textContent = '✗ Error: ' + error;
+			});
+		}
+
+		function resetDynamicEQ() {
+			document.getElementById('bassEnabled').checked = false;
+			document.getElementById('bassLow').value = 0;
+			document.getElementById('bassHigh').value = 0;
+			document.getElementById('bassCurve').value = 'linear';
+			
+			document.getElementById('trebleEnabled').checked = false;
+			document.getElementById('trebleLow').value = 0;
+			document.getElementById('trebleHigh').value = 0;
+			document.getElementById('trebleCurve').value = 'linear';
+			
+			drawEQUnified();
+		}
+
+		function loadDynamicEQConfig() {
+			fetch('/system/config')
+				.then(response => response.json())
+				.then(data => {
+					// Load bass
+					document.getElementById('bassEnabled').checked = !!data.bass_mapping_enabled;
+					document.getElementById('bassLow').value = data.bass_mapping_low_gain || 0;
+					document.getElementById('bassHigh').value = data.bass_mapping_high_gain || 0;
+					document.getElementById('bassCurve').value = data.bass_mapping_curve || 'linear';
+					
+					// Load treble
+					document.getElementById('trebleEnabled').checked = !!data.treble_mapping_enabled;
+					document.getElementById('trebleLow').value = data.treble_mapping_low_gain || 0;
+					document.getElementById('trebleHigh').value = data.treble_mapping_high_gain || 0;
+					document.getElementById('trebleCurve').value = data.treble_mapping_curve || 'linear';
+					
+					drawEQUnified();
+				})
+				.catch(error => {
+					console.log('EQ config not available', error);
+				});
+		}
+
 		// Load LED config on page load
 		window.addEventListener('load', function() {
 			loadLEDConfig();
 			loadSystemConfig();
 			loadDspConfig();
+			loadDynamicEQConfig();
+			
+			// Add real-time graph update listeners for bass
+			['bassEnabled', 'bassLow', 'bassHigh', 'bassCurve'].forEach(id => {
+				var elem = document.getElementById(id);
+				if (elem) {
+					elem.addEventListener('change', updateEQGraph);
+					elem.addEventListener('input', updateEQGraph);
+				}
+			});
+			
+			// Add real-time graph update listeners for treble
+			['trebleEnabled', 'trebleLow', 'trebleHigh', 'trebleCurve'].forEach(id => {
+				var elem = document.getElementById(id);
+				if (elem) {
+					elem.addEventListener('change', updateEQGraph);
+					elem.addEventListener('input', updateEQGraph);
+				}
+			});
 		});
 	</script>
 </body>

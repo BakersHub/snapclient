@@ -42,11 +42,24 @@ static filterParams_t filterParams;
 static ptype_t *filter = NULL;
 
 static double dynamic_vol = 1.0;
+static double dynamic_vol_base = 1.0; // unboosted volume in 0..1 for mapping curve
 
 static bool init = false;
 
 static float *sbuffer0 = NULL;
 static float *sbufout0 = NULL;
+
+// Dynamic bass mapping state
+static bool dynamic_bass_enabled = false;
+static float bass_low_gain = 0.0f;
+static float bass_high_gain = 0.0f;
+static float last_dynamic_bass_gain = 0.0f; // Track last applied gain to avoid unnecessary filter updates
+
+// Dynamic treble mapping state
+static bool dynamic_treble_enabled = false;
+static float treble_low_gain = 0.0f;
+static float treble_high_gain = 0.0f;
+static float last_dynamic_treble_gain = 0.0f;
 
 static float get_runtime_gain_boost(void) {
   system_config_t cfg;
@@ -238,6 +251,26 @@ void dsp_processor_init(void) {
   // Override defaults from NVS if available
   dsp_load_filter_params_from_nvs();
 
+  // Load bass mapping settings from system config
+  system_config_t sys_cfg;
+  if (system_config_load_from_nvs(&sys_cfg) == ESP_OK) {
+    dynamic_bass_enabled = sys_cfg.bass_mapping_enabled;
+    bass_low_gain = sys_cfg.bass_mapping_low_gain;
+    bass_high_gain = sys_cfg.bass_mapping_high_gain;
+    // Initialize last gain for change detection
+    last_dynamic_bass_gain = bass_low_gain + (bass_high_gain - bass_low_gain) * dynamic_vol_base;
+    ESP_LOGI(TAG, "Loaded bass mapping: enabled=%d, low_gain=%.1f, high_gain=%.1f, initial_dynamic_gain=%.1f",
+             dynamic_bass_enabled, bass_low_gain, bass_high_gain, last_dynamic_bass_gain);
+
+    // Load treble mapping settings
+    dynamic_treble_enabled = sys_cfg.treble_mapping_enabled;
+    treble_low_gain = sys_cfg.treble_mapping_low_gain;
+    treble_high_gain = sys_cfg.treble_mapping_high_gain;
+    last_dynamic_treble_gain = treble_low_gain + (treble_high_gain - treble_low_gain) * dynamic_vol_base;
+    ESP_LOGI(TAG, "Loaded treble mapping: enabled=%d, low_gain=%.1f, high_gain=%.1f, initial_dynamic_gain=%.1f",
+             dynamic_treble_enabled, treble_low_gain, treble_high_gain, last_dynamic_treble_gain);
+  }
+
   ESP_LOGI(TAG, "%s: init done", __func__);
 }
 
@@ -356,29 +389,37 @@ int dsp_processor_worker(char *audio, size_t chunk_size, uint32_t samplerate) {
 
     switch (dspFlow) {
       case dspfEQBassTreble: {
-        cnt = 4;
+        cnt = 4;  // 2 filters per channel (bass, treble)
 
         filter =
             (ptype_t *)heap_caps_malloc(sizeof(ptype_t) * cnt, MALLOC_CAP_8BIT);
         if (filter) {
-          // simple EQ control of low and high frequencies (bass, treble)
+          // EQ control of two frequency ranges: bass, treble
           float bass_fc = filterParams.fc_1 / samplerate;
-          float bass_gain = filterParams.gain_1;
+          float bass_gain = filterParams.gain_1; // base bass gain
+          if (dynamic_bass_enabled) {
+            float bass_mapping_gain = bass_low_gain + (bass_high_gain - bass_low_gain) * dynamic_vol_base;
+            bass_gain += bass_mapping_gain;
+          }
+
+          float mids_gain = filterParams.gain_2; // base mids gain (static only, not dynamic)
+
           float treble_fc = filterParams.fc_3 / samplerate;
-          float treble_gain = filterParams.gain_3;
+          float treble_gain = filterParams.gain_3; // base treble gain
+          if (dynamic_treble_enabled) {
+            float treble_mapping_gain = treble_low_gain + (treble_high_gain - treble_low_gain) * dynamic_vol_base;
+            treble_gain += treble_mapping_gain;
+          }
 
-          // filters for CH 0
-          filter[0] = (ptype_t){LOWSHELF, bass_fc, bass_gain,       0.707,
-                                NULL,     NULL,    {0, 0, 0, 0, 0}, {0, 0}};
-          filter[1] = (ptype_t){HIGHSHELF, treble_fc, treble_gain,     0.707,
-                                NULL,      NULL,      {0, 0, 0, 0, 0}, {0, 0}};
-          // filters for CH 1
-          filter[2] = (ptype_t){LOWSHELF, bass_fc, bass_gain,       0.707,
-                                NULL,     NULL,    {0, 0, 0, 0, 0}, {0, 0}};
-          filter[3] = (ptype_t){HIGHSHELF, treble_fc, treble_gain,     0.707,
-                                NULL,      NULL,      {0, 0, 0, 0, 0}, {0, 0}};
+          // filters for CH 0: bass, treble (mids is static only, not DSP processed)
+          filter[0] = (ptype_t){LOWSHELF,  bass_fc,   bass_gain,      0.707, NULL, NULL, {0,0,0,0,0}, {0,0}};
+          filter[1] = (ptype_t){HIGHSHELF, treble_fc, treble_gain,    0.707, NULL, NULL, {0,0,0,0,0}, {0,0}};
+          // filters for CH 1: bass, treble
+          filter[2] = (ptype_t){LOWSHELF,  bass_fc,   bass_gain,      0.707, NULL, NULL, {0,0,0,0,0}, {0,0}};
+          filter[3] = (ptype_t){HIGHSHELF, treble_fc, treble_gain,    0.707, NULL, NULL, {0,0,0,0,0}, {0,0}};
 
-          ESP_LOGI(TAG, "got new setting for dspfEQBassTreble");
+          ESP_LOGI(TAG, "EQBassTreble: bass gain=%.2f dB, mids gain=%.2f dB (static), treble gain=%.2f dB",
+                   bass_gain, mids_gain, treble_gain);
         } else {
           ESP_LOGE(TAG, "failed to get memory for filter");
         }
@@ -771,16 +812,85 @@ int dsp_processor_worker(char *audio, size_t chunk_size, uint32_t samplerate) {
  */
 void dsp_processor_set_volome(double volume) {
   if (volume >= 0 && volume <= 1.0) {
-    // Apply 2.5 squared volume profile to reduce loudness at low percentages
-    double processed_volume = pow(volume, 2.5);
-    
+    // Apply 2.5 volume curve to reduce loudness at low percentages
+    double raw_volume = pow(volume, 2.5);
+    dynamic_vol_base = raw_volume;
+
     // Apply gain boost to match A2DP loudness levels (runtime configurable)
     float gain_boost = get_runtime_gain_boost();
-    processed_volume *= gain_boost;
+    dynamic_vol = raw_volume * gain_boost;
+
+    ESP_LOGI(TAG, "Set volume to %f (raw: %f, boosted: %f, boost %fx)",
+             volume, dynamic_vol_base, dynamic_vol, (double)gain_boost);
+
+    // Check if any dynamic EQ gain has changed significantly and update filters if needed
+    bool needs_update = false;
     
-    ESP_LOGI(TAG, "Set volume to %f (processed: %f, boost: %fx)", volume,
-             processed_volume, (double)gain_boost);
-    dynamic_vol = processed_volume;
+    if (dynamic_bass_enabled && filterParams.dspFlow == dspfEQBassTreble) {
+      float current_gain = bass_low_gain + (bass_high_gain - bass_low_gain) * dynamic_vol_base;
+      if (fabsf(current_gain - last_dynamic_bass_gain) >= 1.5f) {
+        last_dynamic_bass_gain = current_gain;
+        needs_update = true;
+      }
+    }
+
+    if (dynamic_treble_enabled && filterParams.dspFlow == dspfEQBassTreble) {
+      float current_gain = treble_low_gain + (treble_high_gain - treble_low_gain) * dynamic_vol_base;
+      if (fabsf(current_gain - last_dynamic_treble_gain) >= 1.5f) {
+        last_dynamic_treble_gain = current_gain;
+        needs_update = true;
+      }
+    }
+
+    if (needs_update) {
+      // Trigger filter update for all three bands
+      filterParams_t updateParams = filterParams;
+      xQueueOverwrite(filterUpdateQHdl, &updateParams);
+    }
+
+    // Note: We don't re-init filters here as volume changes are frequent
+    // and filter re-init is expensive. The bass gain is calculated dynamically
+    // in the filter setup based on dynamic_vol_base.
   }
+}
+// --- Dynamic Bass Mapping Implementation ---
+void dsp_processor_set_dynamic_bass(bool enabled) {
+    dynamic_bass_enabled = enabled;
+    init = false; // reinit filters so new mode is effective immediately
+}
+
+void dsp_processor_set_bass_mapping(float low_gain, float high_gain) {
+    bass_low_gain = low_gain;
+    bass_high_gain = high_gain;
+    init = false; // reinit filters so settings are effective immediately
+}
+
+bool dsp_processor_get_dynamic_bass_enabled(void) {
+    return dynamic_bass_enabled;
+}
+
+void dsp_processor_get_bass_mapping(float *low_gain, float *high_gain) {
+    if (low_gain) *low_gain = bass_low_gain;
+    if (high_gain) *high_gain = bass_high_gain;
+}
+
+void dsp_processor_set_dynamic_treble(bool enabled) {
+    dynamic_treble_enabled = enabled;
+    init = false; // reinit filters so new mode is effective immediately
+}
+
+void dsp_processor_set_treble_mapping(float low_gain, float high_gain) {
+    treble_low_gain = low_gain;
+    treble_high_gain = high_gain;
+    init = false; // reinit filters so settings are effective immediately
+}
+
+bool dsp_processor_get_dynamic_treble_enabled(void) {
+    return dynamic_treble_enabled;
+}
+
+void dsp_processor_get_treble_mapping(float *low_gain, float *high_gain) {
+    if (low_gain) *low_gain = treble_low_gain;
+    if (high_gain) *high_gain = treble_high_gain;
 }
 #endif

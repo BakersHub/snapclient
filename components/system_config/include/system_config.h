@@ -37,6 +37,30 @@ typedef struct {
     int   i2s_dataout_pin;
     int   pcm5102a_mute_pin;
     int   ap_mode_button_gpio;
+
+    bool  snapcast_audio_enabled;
+    bool  bluetooth_audio_enabled;
+    bool  stop_wifi_during_bt;  // Stop WiFi while Bluetooth audio is active
+
+    int   cfg_gpio_pin;       // GPIO pin for user-configurable LED or other function
+
+    // Dynamic bass mapping settings (300Hz)
+    bool  bass_mapping_enabled;
+    float bass_mapping_low_gain;
+    float bass_mapping_high_gain;
+    char  bass_mapping_curve[16];  // "linear", "exponential", "logarithmic"
+
+    // Dynamic mids mapping settings (1000Hz)
+    bool  mids_mapping_enabled;
+    float mids_mapping_low_gain;
+    float mids_mapping_high_gain;
+    char  mids_mapping_curve[16];
+
+    // Dynamic treble mapping settings (4000Hz)
+    bool  treble_mapping_enabled;
+    float treble_mapping_low_gain;
+    float treble_mapping_high_gain;
+    char  treble_mapping_curve[16];
 } system_config_t;
 
 void system_config_set_defaults(system_config_t *config);
